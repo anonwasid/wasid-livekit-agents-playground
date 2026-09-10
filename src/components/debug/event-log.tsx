@@ -42,6 +42,22 @@ const TYPE_FILTER_STYLE: Record<
     background: "rgba(148, 163, 184, 0.16)",
     color: "#94A3B8",
   },
+  amdPrediction: {
+    background: "rgba(236, 72, 153, 0.16)",
+    color: "#F472B6",
+  },
+  eotPrediction: {
+    background: "rgba(168, 85, 247, 0.16)",
+    color: "#C084FC",
+  },
+  functionToolsStarted: {
+    background: "rgba(139, 92, 246, 0.16)",
+    color: "#A78BFA",
+  },
+  debugMessage: {
+    background: "rgba(100, 116, 139, 0.16)",
+    color: "#94A3B8",
+  },
 };
 
 const CONTROL_BUTTON_CLASS =

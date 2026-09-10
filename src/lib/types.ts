@@ -48,6 +48,10 @@ export const ALL_SESSION_EVENT_TYPES: SessionEventType[] = [
   "error",
   "overlappingSpeech",
   "sessionUsageUpdated",
+  "amdPrediction",
+  "eotPrediction",
+  "functionToolsStarted",
+  "debugMessage",
 ];
 
 export function timestampToSeconds(ts: Timestamp | undefined): number {
@@ -77,7 +81,7 @@ export function userStateLabel(state: AgentSession.UserState): string {
   return USER_STATE_LABELS[state] ?? "unknown";
 }
 
-const EVENT_TYPE_LABELS: Record<SessionEventType, string> = {
+const EVENT_TYPE_LABELS: Record<string, string> = {
   agentStateChanged: "agent state changed",
   userStateChanged: "user state changed",
   conversationItemAdded: "conversation item added",
@@ -86,8 +90,12 @@ const EVENT_TYPE_LABELS: Record<SessionEventType, string> = {
   error: "error",
   overlappingSpeech: "overlapping speech",
   sessionUsageUpdated: "session usage updated",
+  amdPrediction: "AMD prediction",
+  eotPrediction: "EOT prediction",
+  functionToolsStarted: "function tools started",
+  debugMessage: "debug message",
 };
 
 export function eventTypeLabel(eventCase: SessionEventType): string {
-  return EVENT_TYPE_LABELS[eventCase];
+  return EVENT_TYPE_LABELS[eventCase] ?? String(eventCase);
 }
