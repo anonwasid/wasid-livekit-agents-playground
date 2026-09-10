@@ -202,7 +202,7 @@ export function HomeInner() {
           <>
             <button
               onClick={handleLogout}
-              className="absolute top-4 right-4 z-50 text-xs px-3 py-1.5 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 hover:text-red-400 transition backdrop-blur-sm"
+              className="absolute bottom-4 left-4 z-40 text-xs px-3 py-1.5 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 hover:text-red-400 transition backdrop-blur-sm shadow-lg"
             >
               Sign Out
             </button>
