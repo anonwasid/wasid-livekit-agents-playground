@@ -1,8 +1,8 @@
 import { NextApiRequest, NextApiResponse } from "next";
 
-import { TokenSourceRequestPayload } from "livekit-client";
 import { AccessToken } from "livekit-server-sdk";
 import { RoomConfiguration } from "@livekit/protocol";
+import { verifySession, parseCookies } from "@/lib/auth";
 
 const apiKey = process.env.LIVEKIT_API_KEY;
 const apiSecret = process.env.LIVEKIT_API_SECRET;
@@ -16,21 +16,16 @@ type TokenRequest = {
   room_config?: ReturnType<RoomConfiguration["toJson"]>;
 };
 
-// This route handler creates a token for a given room and participant
-// it's compatible with LiveKit's TokenSourceEndpoint API
 async function createToken(request: TokenRequest) {
   const at = new AccessToken(
     process.env.LIVEKIT_API_KEY,
     process.env.LIVEKIT_API_SECRET,
     {
       identity: request.participant_identity,
-      // Token to expire after 10 minutes
       ttl: "10m",
-    },
+    }
   );
 
-  // Token permissions can be added here based on the
-  // desired capabilities of the participant
   at.addGrant({
     roomJoin: true,
     room: request.room_name,
@@ -58,13 +53,24 @@ async function createToken(request: TokenRequest) {
 
 export default async function handleToken(
   req: NextApiRequest,
-  res: NextApiResponse,
+  res: NextApiResponse
 ) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     res.status(405).end("Method Not Allowed");
     return;
   }
+
+  // Enforce session authentication before token issuance
+  const cookies = parseCookies(req.headers.cookie);
+  const sessionToken = cookies["lkvoice_session"];
+  const auth = verifySession(sessionToken);
+  if (!auth.valid) {
+    return res
+      .status(401)
+      .json({ message: "Authentication required to generate WebRTC tokens." });
+  }
+
   if (!apiKey || !apiSecret) {
     res.statusMessage = "Environment variables aren't set up correctly";
     res.status(500).end();
