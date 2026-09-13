@@ -1,4 +1,4 @@
-"""Agent dispatch management routes with Canonical WASID Agent synchronization."""
+"""Agent dispatch management routes with Canonical WASID Agent synchronization & Voice Routing Matrix."""
 
 import logging
 from datetime import datetime, timezone
@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.security.basic_auth import get_current_user, requires_admin
 from app.security.csrf import get_csrf_token, verify_csrf_token
 from app.services.agent_sync import agent_sync_service
+from app.services.sip_routing import sip_routing_service, CANONICAL_MASTER_AGENT
 from app.services.livekit import LiveKitClient, get_livekit_client
 from app.utils.flash import flash, get_flash
 
@@ -74,7 +75,7 @@ async def agents_index(
     force: Optional[str] = None,
     lk: LiveKitClient = Depends(get_livekit_client),
 ):
-    """Fleet overview — Synchronized canonical WASID agents & LiveKit operational layer."""
+    """WASID LIVE Control Center — Synchronized canonical agents, voice routing matrix & dispatches."""
     force_sync = bool(force)
     if force_sync:
         from app.services import cache as dispatch_cache
@@ -122,6 +123,37 @@ async def agents_index(
         key = s["agent_name"]
         agent_groups.setdefault(key, []).append(s)
 
+    # 3. Fetch Voice Routing Matrix
+    try:
+        routing_matrix = await sip_routing_service.get_voice_routing_matrix(lk)
+    except Exception as e:
+        logger.warning(f"Error fetching voice routing matrix: {e}")
+        routing_matrix = {
+            "routes": [],
+            "inbound_trunks_count": 0,
+            "outbound_trunks_count": 0,
+            "dispatch_rules_count": 0,
+            "active_sip_calls": 0,
+            "canonical_target_agent": CANONICAL_MASTER_AGENT,
+            "vobiz_ready": False,
+            "worker_status": "ONLINE (Voice Pool Ready)",
+            "voice_pipelines": ["REALTIME (Gemini Live)", "CASCADE (Groq + LiteLLM + Gemini TTS)"],
+            "summary": {"inbound_count": 0, "outbound_count": 0, "total_routes": 0, "unique_room_guarantee": True},
+        }
+
+    # 4. Fetch Live Telephony Sessions
+    try:
+        telephony_sessions = await sip_routing_service.get_live_telephony_sessions(lk)
+    except Exception as e:
+        logger.debug(f"Error fetching live telephony sessions: {e}")
+        telephony_sessions = []
+
+    # 5. Fetch Outbound Trunks for quick call trigger modal
+    try:
+        outbound_trunks = await lk.list_sip_trunks()
+    except Exception:
+        outbound_trunks = []
+
     flash_message, flash_type = get_flash(request)
 
     return request.app.state.templates.TemplateResponse(
@@ -134,6 +166,9 @@ async def agents_index(
             "fleet": fleet,
             "canonical_agents": fleet["canonical_agents"],
             "agent_groups": agent_groups,
+            "routing_matrix": routing_matrix,
+            "telephony_sessions": telephony_sessions,
+            "outbound_trunks": outbound_trunks,
             "total_agents": fleet["total_registered_agents"],
             "total_sessions": fleet["active_sessions"],
             "total_dispatches": len(summaries),
@@ -158,6 +193,56 @@ async def trigger_fleet_sync(
     except Exception as e:
         logger.warning(f"Error re-syncing canonical agents: {e}")
         flash(request, f"Sync warning: {e}", "warning")
+    return RedirectResponse(url="/agents", status_code=303)
+
+
+@router.post("/agents/provision-vobiz", dependencies=[Depends(requires_admin)])
+async def provision_vobiz_route(
+    request: Request,
+    csrf_token: str = Form(...),
+    lk: LiveKitClient = Depends(get_livekit_client),
+):
+    """Ensure canonical Vobiz individual dispatch rule is configured."""
+    await verify_csrf_token(request)
+    try:
+        res = await sip_routing_service.provision_vobiz_canonical_rule(lk)
+        flash(
+            request,
+            f"Vobiz SIP Inbound Rule successfully configured ({res['name']}) -> target: {res['agent_name']} ({res['room_strategy']}).",
+            "success",
+        )
+    except Exception as e:
+        logger.warning(f"Failed to provision Vobiz rule: {e}")
+        flash(request, f"Vobiz provisioning failed: {e}", "danger")
+    return RedirectResponse(url="/agents", status_code=303)
+
+
+@router.post("/agents/outbound-call", dependencies=[Depends(requires_admin)])
+async def agent_outbound_call(
+    request: Request,
+    csrf_token: str = Form(...),
+    sip_trunk_id: str = Form(...),
+    sip_call_to: str = Form(...),
+    agent_name: str = Form(CANONICAL_MASTER_AGENT),
+    lk: LiveKitClient = Depends(get_livekit_client),
+):
+    """Initiate an outbound call enforcing 1 call = 1 unique room with automatic agent dispatch."""
+    await verify_csrf_token(request)
+    try:
+        res = await sip_routing_service.initiate_outbound_call(
+            lk=lk,
+            sip_trunk_id=sip_trunk_id.strip(),
+            sip_call_to=sip_call_to.strip(),
+            agent_name=agent_name.strip(),
+        )
+        flash(
+            request,
+            f"Outbound call initiated to {sip_call_to} in unique room '{res['room_name']}' with agent '{agent_name}'.",
+            "success",
+        )
+    except Exception as e:
+        logger.warning(f"Failed to initiate outbound call: {e}")
+        flash(request, f"Outbound call failed: {e}", "danger")
     return RedirectResponse(url="/agents", status_code=303)
 
 

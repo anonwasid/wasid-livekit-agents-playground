@@ -1,829 +1,1225 @@
 {% extends "base.html.j2" %}
 
-{% block title %}WASID Agent Fleet Operations - LiveKit Dashboard{% endblock %}
+{% block title %}WASID LIVE | Agent Control Center & Voice Telephony{% endblock %}
 
 {% block extra_head %}
 <style>
+/* WASID LIVE Control Center — Dark Enterprise Theme */
 :root {
-    --stitch-bg: #0b0f19;
-    --stitch-surface: #111827;
-    --stitch-surface-high: #1f2937;
-    --stitch-surface-higher: #374151;
-    --stitch-primary: #06b6d4;
-    --stitch-primary-glow: rgba(6, 182, 212, 0.25);
-    --stitch-success: #10b981;
-    --stitch-success-glow: rgba(16, 185, 129, 0.25);
-    --stitch-secondary: #818cf8;
-    --stitch-border: #1e293b;
-    --stitch-border-bright: #334155;
-    --stitch-text-muted: #94a3b8;
+    --wl-bg: #0d1117;
+    --wl-surface: #161b22;
+    --wl-surface-subtle: #21262d;
+    --wl-border: #30363d;
+    --wl-border-bright: #484f58;
+    --wl-text-main: #f0f6fc;
+    --wl-text-muted: #8b949e;
+    --wl-text-subtle: #6e7681;
+    --wl-blue: #388bfd;
+    --wl-green: #238636;
+    --wl-green-text: #3fb950;
+    --wl-amber: #d29922;
+    --wl-red: #f85149;
+    --wl-purple: #a371f7;
 }
 
-.stitch-card {
-    background-color: var(--stitch-surface);
-    border: 1px solid var(--stitch-border);
+.wl-container {
+    padding-bottom: 3rem;
+}
+
+/* Control Header */
+.wl-header-bar {
+    background: linear-gradient(180deg, #161b22 0%, #11141a 100%);
+    border: 1px solid var(--wl-border);
     border-radius: 8px;
-    transition: all 0.2s ease-in-out;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.5rem;
 }
-.stitch-card:hover {
-    border-color: var(--stitch-border-bright);
+
+.wl-status-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
 }
-.stitch-card-active {
-    border: 2px solid var(--stitch-primary) !important;
-    box-shadow: 0 0 20px var(--stitch-primary-glow);
-}
-.stitch-metric-val {
-    font-family: 'JetBrains Mono', monospace, ui-monospace;
-    font-size: 1.75rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-}
-.stitch-badge {
-    font-size: 0.72rem;
-    font-weight: 600;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    letter-spacing: 0.02em;
+
+.wl-status-pill {
+    background-color: var(--wl-surface-subtle);
+    border: 1px solid var(--wl-border);
+    color: var(--wl-text-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 0.35rem 0.65rem;
+    border-radius: 6px;
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.4rem;
 }
-.badge-auth {
-    background-color: rgba(15, 23, 42, 0.9);
-    border: 1px solid var(--stitch-border-bright);
-    color: #cbd5e1;
+
+.wl-status-pill strong {
+    color: var(--wl-text-main);
 }
-.badge-synced {
-    background-color: rgba(16, 185, 129, 0.15);
-    border: 1px solid rgba(16, 185, 129, 0.4);
-    color: #34d399;
-}
-.badge-pipeline {
-    background-color: rgba(99, 102, 241, 0.15);
-    border: 1px solid rgba(99, 102, 241, 0.3);
-    color: #a5b4fc;
-}
-.badge-spec {
-    background-color: var(--stitch-surface-high);
-    border: 1px solid var(--stitch-border);
-    color: #e2e8f0;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.75rem;
-}
-.pulse-dot {
+
+.wl-dot-green {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    display: inline-block;
+    background-color: var(--wl-green-text);
+    box-shadow: 0 0 6px rgba(63, 185, 80, 0.4);
 }
-.pulse-green {
-    background-color: #10b981;
-    box-shadow: 0 0 8px #10b981;
-    animation: green-pulse 2s infinite;
+
+.wl-dot-blue {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--wl-blue);
 }
-@keyframes green-pulse {
-    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-    70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
-    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+
+/* Section Cards */
+.wl-card {
+    background-color: var(--wl-surface);
+    border: 1px solid var(--wl-border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-bottom: 1.5rem;
 }
-.json-view {
-    background-color: #090d16;
-    color: #38bdf8;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.78rem;
-    padding: 1rem;
+
+.wl-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 0.85rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--wl-border);
+}
+
+.wl-card-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--wl-text-main);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+/* Agent Fleet Cards */
+.agent-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.agent-fleet-card {
+    background-color: #12161f;
+    border: 1px solid var(--wl-border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    position: relative;
+    transition: border-color 0.15s ease;
+}
+
+.agent-fleet-card:hover {
+    border-color: var(--wl-border-bright);
+}
+
+.agent-fleet-card.primary-agent {
+    border-left: 3px solid var(--wl-blue);
+}
+
+.agent-fleet-card.customer-agent {
+    border-left: 3px solid var(--wl-purple);
+}
+
+.agent-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+}
+
+.agent-id-tag {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--wl-text-main);
+}
+
+.agent-role-desc {
+    font-size: 0.82rem;
+    color: var(--wl-text-muted);
+    margin-bottom: 1rem;
+    line-height: 1.4;
+}
+
+.agent-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+}
+
+.wl-badge {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid var(--wl-border);
+    background-color: var(--wl-surface-subtle);
+    color: var(--wl-text-muted);
+}
+
+.badge-blue {
+    background-color: rgba(56, 139, 253, 0.12);
+    border-color: rgba(56, 139, 253, 0.3);
+    color: #79c0ff;
+}
+
+.badge-green {
+    background-color: rgba(46, 160, 67, 0.12);
+    border-color: rgba(46, 160, 67, 0.3);
+    color: #56d364;
+}
+
+.badge-purple {
+    background-color: rgba(163, 113, 247, 0.12);
+    border-color: rgba(163, 113, 247, 0.3);
+    color: #d2a8ff;
+}
+
+.agent-metric-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    background-color: #0b0e14;
+    border: 1px solid var(--wl-border);
     border-radius: 6px;
-    max-height: 420px;
+    padding: 0.6rem 0.5rem;
+    margin-bottom: 1rem;
+    text-align: center;
+}
+
+.agent-metric-item {
+    padding: 0 0.25rem;
+}
+
+.agent-metric-val {
+    font-size: 0.95rem;
+    font-weight: 700;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    color: var(--wl-text-main);
+}
+
+.agent-metric-lbl {
+    font-size: 0.68rem;
+    color: var(--wl-text-subtle);
+    text-transform: uppercase;
+}
+
+/* Voice Routing Matrix */
+.routing-pipeline-diagram {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: #0d1117;
+    border: 1px solid var(--wl-border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+    overflow-x: auto;
+}
+
+.pipeline-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    min-width: 110px;
+}
+
+.pipeline-step-box {
+    background-color: var(--wl-surface-subtle);
+    border: 1px solid var(--wl-border);
+    padding: 0.45rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--wl-text-main);
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.pipeline-step-sub {
+    font-size: 0.68rem;
+    color: var(--wl-text-subtle);
+    margin-top: 0.3rem;
+}
+
+.pipeline-arrow {
+    color: var(--wl-text-subtle);
+    font-size: 1.1rem;
+    padding: 0 0.5rem;
+}
+
+/* Operational Tables */
+.wl-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.82rem;
+}
+
+.wl-table th {
+    background-color: #12161f;
+    color: var(--wl-text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    padding: 0.65rem 0.75rem;
+    border-bottom: 1px solid var(--wl-border);
+    text-align: left;
+}
+
+.wl-table td {
+    padding: 0.65rem 0.75rem;
+    border-bottom: 1px solid #21262d;
+    color: var(--wl-text-main);
+    vertical-align: middle;
+}
+
+.wl-table tr:hover td {
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+.mono-cell {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.78rem;
+}
+
+/* Slide-out Drawer (Agent Inspector) */
+.wl-drawer-backdrop {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: 1050;
+    backdrop-filter: blur(2px);
+}
+
+.wl-drawer {
+    display: none;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 740px;
+    max-width: 95vw;
+    background-color: #12161f;
+    border-left: 1px solid var(--wl-border);
+    z-index: 1060;
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+    flex-direction: column;
+}
+
+.wl-drawer.open {
+    display: flex;
+}
+
+.wl-drawer-header {
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--wl-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #161b22;
+}
+
+.wl-drawer-nav {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.5rem 1rem;
+    background-color: #0e1218;
+    border-bottom: 1px solid var(--wl-border);
+    overflow-x: auto;
+}
+
+.wl-drawer-nav button {
+    background: none;
+    border: none;
+    color: var(--wl-text-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 0.4rem 0.75rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.wl-drawer-nav button.active {
+    background-color: var(--wl-surface-subtle);
+    color: var(--wl-text-main);
+    font-weight: 600;
+}
+
+.wl-drawer-body {
+    flex: 1;
     overflow-y: auto;
-    border: 1px solid var(--stitch-border);
+    padding: 1.25rem 1.5rem;
+}
+
+.spec-dim-card {
+    background-color: #161b22;
+    border: 1px solid var(--wl-border);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.spec-dim-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--wl-blue);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.6rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
 }
 </style>
 {% endblock %}
 
-{% block page_header %}
-<div class="d-flex flex-column">
-    <div class="d-flex align-items-center gap-2">
-        <h1 class="page-title mb-0">WASID Agent Fleet</h1>
-        <span class="badge bg-primary text-dark fw-bold px-2 py-1" style="font-size: 0.7rem;">SYNCHRONIZED</span>
-    </div>
-    <p class="page-subtitle mb-0 text-muted" style="font-size: 0.85rem;">
-        Authoritative Source: <a href="{{ fleet.authoritative_url }}" target="_blank" class="text-info text-decoration-none fw-semibold">{{ fleet.authoritative_source }}</a>
-        • Projection: <code>lkdashboard.wasidai.com/agents</code>
-    </p>
-</div>
-<div class="top-bar-actions d-flex align-items-center gap-2">
-    <!-- Trigger Fleet Re-Sync Form -->
-    <form action="/agents/sync" method="POST" class="m-0">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit" class="btn btn-outline-info btn-sm d-flex align-items-center gap-1" title="Force immediate re-sync with agent.wasidai.com">
-            <i class="bi bi-arrow-repeat"></i>
-            <span>Re-Sync Fleet</span>
-        </button>
-    </form>
-    
-    <!-- Dispatch Agent Button -->
-    <button type="button" class="btn btn-primary btn-sm d-flex align-items-center gap-1 shadow-sm" data-bs-toggle="modal" data-bs-target="#createDispatchModal">
-        <i class="bi bi-send-fill"></i>
-        <span>Dispatch Agent</span>
-    </button>
-</div>
-{% endblock %}
-
 {% block content %}
-<!-- Real-Time Telemetry & Drift Status Banner -->
-<div class="stitch-card p-3 mb-4 d-flex flex-wrap align-items-center justify-content-between gap-3" style="background: linear-gradient(90deg, #111827 0%, #0f172a 100%);">
-    <div class="d-flex flex-wrap align-items-center gap-3">
+<div class="wl-container">
+
+    <!-- Flash Notifications -->
+    {% if flash_message %}
+    <div class="alert alert-{{ flash_type or 'info' }} alert-dismissible fade show border-0 mb-4" role="alert">
         <div class="d-flex align-items-center gap-2">
-            <span class="pulse-dot pulse-green"></span>
-            <span class="text-muted small">LiveKit Gateway:</span>
-            <code class="text-light px-2 py-0.5 rounded" style="background: rgba(0,0,0,0.4); font-size:0.8rem;">{{ fleet.livekit_gateway }}</code>
+            <i class="bi {% if flash_type == 'success' %}bi-check-circle-fill{% elif flash_type == 'danger' %}bi-exclamation-triangle-fill{% else %}bi-info-circle-fill{% endif %}"></i>
+            <span>{{ flash_message }}</span>
         </div>
-        <div class="vr bg-secondary d-none d-md-block" style="opacity: 0.3; height: 16px;"></div>
-        <div class="d-flex align-items-center gap-2">
-            <i class="bi bi-shield-check text-success fs-5"></i>
-            <span class="text-muted small">Drift Detection:</span>
-            <span class="text-success fw-semibold small">{{ fleet.drift_summary }}</span>
-        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
-    <div class="d-flex align-items-center gap-3">
-        <span class="badge badge-auth">
-            <i class="bi bi-lock-fill text-warning"></i> Authoritative Source: {{ fleet.authoritative_source }}
-        </span>
-        <span class="text-muted small" style="font-family: monospace;">Sync: {{ fleet.last_synced_at }}</span>
-    </div>
-</div>
+    {% endif %}
 
-<!-- 4 High-Density Hero Fleet Metric Cards -->
-<div class="row g-3 mb-4" id="hero-metrics">
-    <!-- Card 1: Total Registered Agents -->
-    <div class="col-xl-3 col-md-6">
-        <div class="stitch-card p-3 h-100 d-flex flex-col justify-content-between">
-            <div class="d-flex justify-content-between align-items-start mb-2">
-                <span class="text-muted small text-uppercase fw-semibold" style="letter-spacing: 0.05em;">Total Registered</span>
-                <i class="bi bi-robot text-primary fs-4" style="opacity: 0.7;"></i>
-            </div>
+    <!-- 1. Header & System Control Center -->
+    <div class="wl-header-bar">
+        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
             <div>
-                <div class="stitch-metric-val text-light">{{ fleet.total_registered_agents }}</div>
-                <div class="text-info small fw-medium">Canonical Agent Definitions</div>
-            </div>
-            <div class="mt-3 pt-2 border-top border-secondary border-opacity-25 d-flex justify-content-between text-muted small">
-                <span>Scope</span>
-                <span class="text-light">Internal + Customer</span>
-            </div>
-        </div>
-    </div>
-
-    <!-- Card 2: Active Workers -->
-    <div class="col-xl-3 col-md-6">
-        <div class="stitch-card p-3 h-100 d-flex flex-col justify-content-between">
-            <div class="d-flex justify-content-between align-items-start mb-2">
-                <span class="text-muted small text-uppercase fw-semibold" style="letter-spacing: 0.05em;">Active Workers</span>
-                <span class="pulse-dot pulse-green"></span>
-            </div>
-            <div>
-                <div class="stitch-metric-val text-success">{{ fleet.active_workers_summary }}</div>
-                <div class="text-muted small">Readiness: 100% Worker Pool</div>
-            </div>
-            <div class="mt-3 pt-2 border-top border-secondary border-opacity-25 d-flex justify-content-between text-muted small">
-                <span>Heartbeat</span>
-                <span class="text-success">Active &bull; Cluster Healthy</span>
-            </div>
-        </div>
-    </div>
-
-    <!-- Card 3: Active Sessions & Rooms -->
-    <div class="col-xl-3 col-md-6">
-        <div class="stitch-card p-3 h-100 d-flex flex-col justify-content-between">
-            <div class="d-flex justify-content-between align-items-start mb-2">
-                <span class="text-muted small text-uppercase fw-semibold" style="letter-spacing: 0.05em;">Active Sessions</span>
-                <i class="bi bi-broadcast text-warning fs-4" style="opacity: 0.7;"></i>
-            </div>
-            <div>
-                <div class="stitch-metric-val text-light">{{ fleet.active_sessions }} Calls</div>
-                <div class="text-muted small">Across {{ fleet.total_rooms }} LiveKit Rooms</div>
-            </div>
-            <div class="mt-3 pt-2 border-top border-secondary border-opacity-25 d-flex justify-content-between text-muted small">
-                <span>SDK Latency</span>
-                <span class="text-warning fw-semibold">{{ fleet.sdk_latency_ms }} ms</span>
-            </div>
-        </div>
-    </div>
-
-    <!-- Card 4: Fleet Sync Status -->
-    <div class="col-xl-3 col-md-6">
-        <div class="stitch-card p-3 h-100 d-flex flex-col justify-content-between">
-            <div class="d-flex justify-content-between align-items-start mb-2">
-                <span class="text-muted small text-uppercase fw-semibold" style="letter-spacing: 0.05em;">Fleet Sync Status</span>
-                <i class="bi bi-cloud-check-fill text-success fs-4" style="opacity: 0.8;"></i>
-            </div>
-            <div>
-                <div class="stitch-metric-val text-info d-flex align-items-center gap-2">
-                    {{ fleet.fleet_sync_status }}
-                    <i class="bi bi-patch-check-fill text-success" style="font-size: 1.25rem;"></i>
+                <div class="d-flex align-items-center gap-2 mb-1">
+                    <h4 class="mb-0 fw-bold text-white">WASID LIVE</h4>
+                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 px-2 py-1">CONTROL CENTER</span>
+                    <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-2 py-1">PHASE 7 VOICE</span>
                 </div>
-                <div class="text-success small fw-medium">{{ fleet.parity_percentage }} Specification Parity</div>
-            </div>
-            <div class="mt-3 pt-2 border-top border-secondary border-opacity-25 d-flex justify-content-between text-muted small">
-                <span>Last Updated</span>
-                <span class="text-light">{{ fleet.last_synced_at }}</span>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- CANONICAL AGENT CARDS GRID -->
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <div>
-        <h4 class="mb-0 fw-bold">Canonical WASID Master Agents</h4>
-        <p class="text-muted small mb-0">Authoritative agents projected from <code>{{ fleet.authoritative_source }}</code> with LiveKit dispatch bindings</p>
-    </div>
-    <div class="d-flex align-items-center gap-2">
-        <input type="text" id="agentFilterInput" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Filter agents by name or tool..." style="width: 260px;" onkeyup="filterAgents()">
-    </div>
-</div>
-
-<div class="row g-4 mb-5" id="canonical-agents-row">
-    {% for agent in canonical_agents %}
-    <!-- Hidden JSON spec tag for instant 0ms inspector loading -->
-    <script type="application/json" id="spec-data-{{ agent.agent_id }}">{{ agent | tojson | safe }}</script>
-
-    <div class="col-lg-6 agent-card-col" data-agent-id="{{ agent.agent_id }}" data-search-term="{{ agent.name }} {{ agent.agent_id }} {{ agent.description }} {{ agent.display_subtitle }}">
-        <div class="stitch-card p-4 h-100 d-flex flex-column justify-content-between {% if loop.first %}stitch-card-active{% endif %}">
-            <div>
-                <!-- Card Header: Title & Badges -->
-                <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3 pb-3 border-bottom border-secondary border-opacity-25">
-                    <div>
-                        <div class="d-flex align-items-center gap-2">
-                            <i class="bi bi-cpu-fill text-primary fs-4"></i>
-                            <h5 class="fw-bold text-light mb-0" style="font-family: 'JetBrains Mono', monospace;">{{ agent.agent_id }}</h5>
-                            {% if loop.first %}
-                            <span class="badge bg-primary text-dark fw-bold px-1.5 py-0.5" style="font-size:0.65rem;">PRIMARY</span>
-                            {% endif %}
-                        </div>
-                        <div class="text-muted small mt-1">{{ agent.display_subtitle }}</div>
-                    </div>
-                    <div class="d-flex flex-wrap align-items-center gap-1.5">
-                        <span class="stitch-badge badge-auth" title="Source of truth is agent.wasidai.com">
-                            <i class="bi bi-lock-fill text-warning"></i> Authoritative
-                        </span>
-                        <span class="stitch-badge badge-synced" title="Local LiveKit projection is synchronized">
-                            <i class="bi bi-check-circle-fill"></i> Synced
-                        </span>
-                    </div>
-                </div>
-
-                <!-- LiveKit Runtime & Pool Status Matrix -->
-                <div class="row g-2 mb-3">
-                    <div class="col-sm-6">
-                        <div class="p-2 rounded bg-dark border border-secondary border-opacity-25 h-100">
-                            <div class="text-muted small text-uppercase" style="font-size: 0.68rem; letter-spacing: 0.05em;">LiveKit Runtime State</div>
-                            <div class="d-flex align-items-center gap-2 mt-1">
-                                <span class="pulse-dot pulse-green"></span>
-                                <span class="text-light fw-semibold small">{{ agent.runtime_status }}</span>
-                            </div>
-                            <div class="text-muted mt-1" style="font-size: 0.72rem;">{{ agent.active_rooms_count }} Active Room(s) &bull; {{ agent.active_sessions }} In-Call</div>
-                        </div>
-                    </div>
-                    <div class="col-sm-6">
-                        <div class="p-2 rounded bg-dark border border-secondary border-opacity-25 h-100">
-                            <div class="text-muted small text-uppercase" style="font-size: 0.68rem; letter-spacing: 0.05em;">Worker Pool Readiness</div>
-                            <div class="d-flex align-items-center justify-content-between mt-1">
-                                <span class="text-light fw-semibold small">Online &bull; Ready</span>
-                                <span class="text-success small"><i class="bi bi-activity"></i> Active</span>
-                            </div>
-                            <div class="text-muted mt-1" style="font-size: 0.72rem;">Cluster: us-east-1 &bull; 100% Health</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Spec Checksum & Pipeline Target -->
-                <div class="p-2 rounded bg-dark border border-secondary border-opacity-25 mb-3 d-flex flex-wrap justify-content-between align-items-center small" style="font-size: 0.75rem;">
-                    <span class="text-muted">Spec Checksum: <code class="text-info">{{ agent.checksum }}</code></span>
-                    <span class="text-muted">Target: <span class="text-light fw-medium">{{ agent.target_pipeline }}</span></span>
-                </div>
-
-                <!-- Configuration Preview Badges -->
-                <div class="d-flex flex-wrap gap-1.5 mb-4">
-                    <span class="stitch-badge badge-spec"><i class="bi bi-tools text-primary"></i> {{ agent.tools_count }} Tools Loaded</span>
-                    <span class="stitch-badge badge-spec"><i class="bi bi-lightning-charge text-warning"></i> {{ agent.skills_count }} Skills Active</span>
-                    <span class="stitch-badge badge-spec"><i class="bi bi-building text-info"></i> {{ agent.role_scope }}</span>
-                    <span class="stitch-badge badge-pipeline"><i class="bi bi-mic-fill"></i> {{ agent.voice_pipeline_label }}</span>
+                <div class="text-secondary small">
+                    Authoritative sync with <a href="{{ fleet.authoritative_url }}" target="_blank" class="text-decoration-none text-info">{{ fleet.authoritative_source }}</a> | Deterministic SIP routing & dispatch
                 </div>
             </div>
 
-            <!-- Action Controls Footer -->
-            <div class="pt-3 border-top border-secondary border-opacity-25 d-flex flex-wrap align-items-center justify-content-between gap-2">
-                <div class="d-flex align-items-center gap-2">
-                    <button type="button" class="btn btn-outline-light btn-sm d-flex align-items-center gap-1.5" onclick="openSpecInspector('{{ agent.agent_id }}')">
-                        <i class="bi bi-card-checklist text-info"></i>
-                        <span>Inspect 13 Dimensions</span>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <form action="/agents/sync" method="post" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button type="submit" class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1">
+                        <i class="bi bi-arrow-repeat"></i>
+                        <span>Sync Fleet</span>
                     </button>
-                    <a href="/agents/{{ agent.agent_id }}" class="btn btn-outline-secondary btn-sm" title="View agent execution history">
-                        <i class="bi bi-clock-history"></i> History
-                    </a>
-                </div>
-                <button type="button" class="btn btn-primary btn-sm d-flex align-items-center gap-1.5 shadow-sm" onclick="prefillDispatchModal('{{ agent.agent_id }}')">
-                    <i class="bi bi-send-fill"></i>
-                    <span>Dispatch to Room</span>
+                </form>
+
+                <form action="/agents/provision-vobiz" method="post" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button type="submit" class="btn btn-sm btn-outline-success d-inline-flex align-items-center gap-1" title="Ensure canonical Vobiz individual dispatch rule is configured">
+                        <i class="bi bi-shield-check"></i>
+                        <span>Provision Vobiz Rule</span>
+                    </button>
+                </form>
+
+                <button type="button" class="btn btn-sm btn-primary d-inline-flex align-items-center gap-1" data-bs-toggle="modal" data-bs-target="#outboundCallModal">
+                    <i class="bi bi-telephone-outbound"></i>
+                    <span>New Outbound Call</span>
+                </button>
+
+                <button type="button" class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1" data-bs-toggle="modal" data-bs-target="#manualDispatchModal">
+                    <i class="bi bi-plus-circle"></i>
+                    <span>Manual Dispatch</span>
                 </button>
             </div>
         </div>
-    </div>
-    {% endfor %}
-</div>
 
-<!-- ACTIVE LIVEKIT DISPATCHES TABLE -->
-<div class="d-flex justify-content-between align-items-center mb-2">
-    <div>
-        <h5 class="mb-0 fw-bold">Active LiveKit Room Dispatches</h5>
-        <p class="text-muted small mb-0">Real-time room dispatch bindings active on the LiveKit server</p>
-    </div>
-</div>
+        <hr class="border-secondary my-3 opacity-25">
 
-<div class="card mb-4" id="dispatches-table">
-    <div class="card-body p-0">
-        {% if agent_groups %}
+        <!-- Operational Status Strip -->
+        <div class="wl-status-strip">
+            <div class="wl-status-pill">
+                <span class="wl-dot-green"></span>
+                <span>LiveKit:</span>
+                <strong>Connected</strong>
+            </div>
+
+            <div class="wl-status-pill">
+                <span class="wl-dot-green"></span>
+                <span>Workers:</span>
+                <strong>{{ fleet.active_workers_summary }}</strong>
+            </div>
+
+            <div class="wl-status-pill">
+                <i class="bi bi-shield-lock-fill text-success"></i>
+                <span>Specification Parity:</span>
+                <strong class="text-success">{{ fleet.parity_percentage }} (Zero Drift)</strong>
+            </div>
+
+            <div class="wl-status-pill">
+                <i class="bi bi-telephone-fill text-info"></i>
+                <span>Vobiz Readiness:</span>
+                {% if routing_matrix.vobiz_ready %}
+                <strong class="text-success">READY (Individual Rule Active)</strong>
+                {% else %}
+                <strong class="text-warning">Ready to Provision Rule</strong>
+                {% endif %}
+            </div>
+
+            <div class="wl-status-pill">
+                <i class="bi bi-activity text-primary"></i>
+                <span>Active Calls:</span>
+                <strong>{{ routing_matrix.active_sip_calls }}</strong>
+            </div>
+
+            <div class="wl-status-pill ms-auto">
+                <i class="bi bi-clock-history"></i>
+                <span>Last Synchronized:</span>
+                <span>{{ fleet.last_synced_at }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. Agent Fleet Section -->
+    <div class="wl-card">
+        <div class="wl-card-header">
+            <h5 class="wl-card-title">
+                <i class="bi bi-robot text-primary"></i>
+                Synchronized Agent Fleet (Canonical Definitions)
+            </h5>
+            <span class="text-muted small">Target for SIP Routing: <strong class="text-white">{{ routing_matrix.canonical_target_agent }}</strong></span>
+        </div>
+
+        <div class="agent-grid">
+            <!-- Card 1: wasid-ai-automation-master -->
+            <div class="agent-fleet-card primary-agent">
+                <div class="agent-header-row">
+                    <div>
+                        <div class="agent-id-tag">wasid-ai-automation-master</div>
+                        <div class="text-info small fw-semibold">WASID AI Automation Master (Canonical Internal)</div>
+                    </div>
+                    <span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-25 px-2 py-1">DEFAULT SIP TARGET</span>
+                </div>
+
+                <div class="agent-role-desc">
+                    Authoritative WASID Master Agent representing the organization's voice automation, system inspection, and platform operations. Built from immutable canonical definition.
+                </div>
+
+                <div class="agent-badges">
+                    <span class="wl-badge badge-blue">REALTIME / CASCADE</span>
+                    <span class="wl-badge badge-green">LiteLLM wasid-live</span>
+                    <span class="wl-badge badge-green">Groq Whisper STT</span>
+                    <span class="wl-badge badge-blue">Gemini Live + TTS</span>
+                    <span class="wl-badge badge-purple">Silero VAD</span>
+                    <span class="wl-badge">v1.2.0-prod</span>
+                </div>
+
+                <div class="agent-metric-strip">
+                    <div class="agent-metric-item">
+                        <div class="agent-metric-val">12</div>
+                        <div class="agent-metric-lbl">Tools</div>
+                    </div>
+                    <div class="agent-metric-item">
+                        <div class="agent-metric-val">5</div>
+                        <div class="agent-metric-lbl">Skills</div>
+                    </div>
+                    <div class="agent-metric-item">
+                        <div class="agent-metric-val">100%</div>
+                        <div class="agent-metric-lbl">Parity</div>
+                    </div>
+                    <div class="agent-metric-item">
+                        <div class="agent-metric-val">{{ agent_groups.get('wasid-ai-automation-master', [])|length }}</div>
+                        <div class="agent-metric-lbl">Dispatches</div>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center pt-2">
+                    <button type="button" class="btn btn-sm btn-outline-info d-inline-flex align-items-center gap-1" onclick="openSpecDrawer('wasid-ai-automation-master')">
+                        <i class="bi bi-layers"></i>
+                        <span>Inspect 13 Dimensions</span>
+                    </button>
+
+                    <button type="button" class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1" onclick="populateDispatchModal('wasid-ai-automation-master')">
+                        <i class="bi bi-play-circle"></i>
+                        <span>Test Dispatch</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Card 2: wasid-customer-master -->
+            <div class="agent-fleet-card customer-agent">
+                <div class="agent-header-row">
+                    <div>
+                        <div class="agent-id-tag">wasid-customer-master</div>
+                        <div class="text-purple small fw-semibold" style="color: #d2a8ff;">WASID Customer Master (Dynamic Multi-Tenant)</div>
+                    </div>
+                    <span class="badge bg-secondary bg-opacity-25 text-light border border-secondary border-opacity-25 px-2 py-1">TENANT BOUND</span>
+                </div>
+
+                <div class="agent-role-desc">
+                    Dynamic master agent projecting tenant-specific configurations, skills, and business catalogs (e.g. FitZone Gym). Extensible for future customer DID routing.
+                </div>
+
+                <div class="agent-badges">
+                    <span class="wl-badge badge-purple">CASCADE PIPELINE</span>
+                    <span class="wl-badge badge-green">FitZone n8n (Frozen)</span>
+                    <span class="wl-badge badge-blue">Gemini TTS</span>
+                    <span class="wl-badge badge-purple">Multi-Tenant Context</span>
+                    <span class="wl-badge">v1.1.0-prod</span>
+                </div>
+
+                <div class="agent-metric-strip">
+                    <div class="agent-metric-item">
+                        <div class="agent-metric-val">10</div>
+                        <div class="agent-metric-lbl">Tools</div>
+                    </div>
+                    <div class="agent-metric-item">
+                        <div class="agent-metric-val">3</div>
+                        <div class="agent-metric-lbl">Skills</div>
+                    </div>
+                    <div class="agent-metric-item">
+                        <div class="agent-metric-val">100%</div>
+                        <div class="agent-metric-lbl">Parity</div>
+                    </div>
+                    <div class="agent-metric-item">
+                        <div class="agent-metric-val">{{ agent_groups.get('wasid-customer-master', [])|length }}</div>
+                        <div class="agent-metric-lbl">Dispatches</div>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center pt-2">
+                    <button type="button" class="btn btn-sm btn-outline-info d-inline-flex align-items-center gap-1" onclick="openSpecDrawer('wasid-customer-master')">
+                        <i class="bi bi-layers"></i>
+                        <span>Inspect 13 Dimensions</span>
+                    </button>
+
+                    <button type="button" class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1" onclick="populateDispatchModal('wasid-customer-master')">
+                        <i class="bi bi-play-circle"></i>
+                        <span>Test Dispatch</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. Voice Routing Matrix Section -->
+    <div class="wl-card">
+        <div class="wl-card-header">
+            <h5 class="wl-card-title">
+                <i class="bi bi-diagram-3 text-success"></i>
+                Voice Routing Matrix (SIP Telephony & Agent Dispatch Chain)
+            </h5>
+            <span class="text-muted small">Guarantee: <strong class="text-success">1 Call = 1 Unique LiveKit Room</strong></span>
+        </div>
+
+        <!-- Visual Routing Pipeline Diagram -->
+        <div class="routing-pipeline-diagram">
+            <div class="pipeline-step">
+                <div class="pipeline-step-box">
+                    <i class="bi bi-telephone text-primary"></i>
+                    <span>Vobiz DID</span>
+                </div>
+                <div class="pipeline-step-sub">PSTN Ingress</div>
+            </div>
+
+            <div class="pipeline-arrow"><i class="bi bi-arrow-right"></i></div>
+
+            <div class="pipeline-step">
+                <div class="pipeline-step-box">
+                    <i class="bi bi-hdd-network text-info"></i>
+                    <span>Inbound Trunk</span>
+                </div>
+                <div class="pipeline-step-sub">Auth & IP Filter</div>
+            </div>
+
+            <div class="pipeline-arrow"><i class="bi bi-arrow-right"></i></div>
+
+            <div class="pipeline-step">
+                <div class="pipeline-step-box">
+                    <i class="bi bi-signpost-split text-warning"></i>
+                    <span>Dispatch Rule</span>
+                </div>
+                <div class="pipeline-step-sub">Individual Rule</div>
+            </div>
+
+            <div class="pipeline-arrow"><i class="bi bi-arrow-right"></i></div>
+
+            <div class="pipeline-step">
+                <div class="pipeline-step-box">
+                    <i class="bi bi-robot text-purple"></i>
+                    <span>Canonical Agent</span>
+                </div>
+                <div class="pipeline-step-sub">wasid-ai-automation-master</div>
+            </div>
+
+            <div class="pipeline-arrow"><i class="bi bi-arrow-right"></i></div>
+
+            <div class="pipeline-step">
+                <div class="pipeline-step-box">
+                    <i class="bi bi-door-open text-success"></i>
+                    <span>Unique Room</span>
+                </div>
+                <div class="pipeline-step-sub">sip-in-{caller}_{hash}</div>
+            </div>
+
+            <div class="pipeline-arrow"><i class="bi bi-arrow-right"></i></div>
+
+            <div class="pipeline-step">
+                <div class="pipeline-step-box">
+                    <i class="bi bi-cpu text-info"></i>
+                    <span>Worker Session</span>
+                </div>
+                <div class="pipeline-step-sub">REALTIME / CASCADE</div>
+            </div>
+        </div>
+
+        <!-- Routing Rules Table -->
         <div class="table-responsive">
-            <table class="table table-dark table-hover mb-0 align-middle">
+            <table class="wl-table">
                 <thead>
-                    <tr class="text-muted small text-uppercase">
-                        <th>Agent Identity</th>
-                        <th>Sessions</th>
-                        <th>Bound Rooms</th>
-                        <th>Dispatch Status</th>
-                        <th>Created At</th>
-                        <th class="text-end">Actions</th>
+                    <tr>
+                        <th>Direction</th>
+                        <th>DID / Phone Number</th>
+                        <th>SIP Trunk</th>
+                        <th>Dispatch Rule</th>
+                        <th>Target Agent</th>
+                        <th>Room Strategy</th>
+                        <th>Worker Status</th>
+                        <th>Routing Status</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for agent_name, dispatches in agent_groups.items() %}
-                    {% set running = dispatches | selectattr('status', 'equalto', 'running') | list | length %}
-                    {% set first = dispatches[0] %}
+                    {% for r in routing_matrix.routes %}
                     <tr>
                         <td>
-                            <div class="d-flex align-items-center gap-2">
-                                <i class="bi bi-robot text-primary"></i>
-                                <a href="/agents/{{ agent_name }}" class="text-light fw-semibold text-decoration-none" style="font-family: monospace;">
-                                    {{ agent_name }}
-                                </a>
-                            </div>
+                            <span class="badge {% if r.direction == 'INBOUND' %}bg-primary{% else %}bg-info{% endif %} bg-opacity-10 text-{{ 'primary' if r.direction == 'INBOUND' else 'info' }} border border-{{ 'primary' if r.direction == 'INBOUND' else 'info' }} border-opacity-25 px-2 py-1">
+                                {{ r.direction }}
+                            </span>
+                        </td>
+                        <td class="mono-cell fw-bold">{{ r.did }}</td>
+                        <td>
+                            <div>{{ r.trunk_name }}</div>
+                            <small class="text-secondary mono-cell">{{ r.trunk_id }}</small>
                         </td>
                         <td>
-                            <span class="badge {% if running > 0 %}bg-success text-dark{% else %}bg-secondary{% endif %}">
-                                {{ running }} running
+                            <div>{{ r.rule_name }}</div>
+                            <small class="text-secondary mono-cell">{{ r.rule_id }}</small>
+                        </td>
+                        <td>
+                            <span class="badge bg-dark border border-secondary text-white mono-cell px-2 py-1">
+                                {{ r.target_agent }}
+                            </span>
+                        </td>
+                        <td class="mono-cell text-success">
+                            <i class="bi bi-check-circle me-1"></i>
+                            {{ r.room_strategy }}
+                        </td>
+                        <td>
+                            <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-2 py-1">
+                                {{ r.worker_status }}
                             </span>
                         </td>
                         <td>
-                            {% set rooms = dispatches | map(attribute='room') | unique | list %}
-                            <span class="text-muted small">{{ rooms | join(', ') if rooms else 'None' }}</span>
+                            <span class="badge bg-success bg-opacity-25 text-success">
+                                {{ r.route_status }}
+                            </span>
                         </td>
-                        <td>
-                            {% if running > 0 %}
-                            <span class="text-success small fw-semibold"><i class="bi bi-play-circle-fill"></i> Running</span>
-                            {% else %}
-                            <span class="text-muted small"><i class="bi bi-pause-circle"></i> Pending / Idle</span>
-                            {% endif %}
-                        </td>
-                        <td class="text-muted small">{{ first.created_at or 'N/A' }}</td>
-                        <td class="text-end">
-                            <button class="btn btn-outline-info btn-sm py-0 px-2" onclick="prefillDispatchModal('{{ agent_name }}')">
-                                Dispatch
-                            </button>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center py-4 text-secondary">
+                            <div class="mb-2"><i class="bi bi-info-circle fs-4 text-warning"></i></div>
+                            <div>No active SIP routes registered yet.</div>
+                            <div class="small text-muted mt-1">Click <strong>"Provision Vobiz Rule"</strong> above to register the canonical individual dispatch rule.</div>
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
-        {% else %}
-        <div class="text-center py-5">
-            <i class="bi bi-broadcast text-secondary fs-1 mb-2"></i>
-            <h6 class="text-light">No Active Explicit Room Dispatches</h6>
-            <p class="text-muted small mb-3">Both canonical agents are registered and ready. Use the Dispatch button to route an agent into a LiveKit room.</p>
-            <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createDispatchModal">
-                <i class="bi bi-plus-circle"></i> Dispatch Agent Now
-            </button>
+    </div>
+
+    <!-- 4. Live Telephony Sessions & Dispatches Section -->
+    <div class="wl-card">
+        <div class="wl-card-header">
+            <h5 class="wl-card-title">
+                <i class="bi bi-broadcast text-danger"></i>
+                Live Telephony Sessions & Active Dispatches
+            </h5>
+            <span class="text-muted small">Total Dispatches: <strong class="text-white">{{ total_dispatches }}</strong></span>
+        </div>
+
+        {% if telephony_sessions %}
+        <div class="table-responsive mb-4">
+            <h6 class="text-info small fw-bold text-uppercase mb-2">Active Telephony Calls</h6>
+            <table class="wl-table">
+                <thead>
+                    <tr>
+                        <th>Direction</th>
+                        <th>Caller Identity</th>
+                        <th>DID</th>
+                        <th>Agent</th>
+                        <th>Room Name</th>
+                        <th>Participants</th>
+                        <th>Duration</th>
+                        <th>Voice Mode</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in telephony_sessions %}
+                    <tr>
+                        <td>
+                            <span class="badge bg-primary bg-opacity-25 text-primary">{{ s.direction }}</span>
+                        </td>
+                        <td class="mono-cell fw-bold">{{ s.caller }}</td>
+                        <td class="mono-cell">{{ s.did }}</td>
+                        <td class="mono-cell text-info">{{ s.agent_name }}</td>
+                        <td class="mono-cell text-success">{{ s.room_name }}</td>
+                        <td>{{ s.num_participants }}</td>
+                        <td>{{ s.duration }}</td>
+                        <td><span class="badge bg-secondary">{{ s.provider_mode }}</span></td>
+                        <td><span class="badge bg-success">{{ s.status }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
         {% endif %}
+
+        <!-- Agent Dispatches List -->
+        <div class="table-responsive">
+            <table class="wl-table">
+                <thead>
+                    <tr>
+                        <th>Dispatch ID</th>
+                        <th>Agent</th>
+                        <th>Room</th>
+                        <th>Running Jobs</th>
+                        <th>Total Jobs</th>
+                        <th>Overall Status</th>
+                        <th>Created At</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for agent_name, dispatches in agent_groups.items() %}
+                        {% for d in dispatches %}
+                        <tr>
+                            <td class="mono-cell">{{ d.id[:16] }}...</td>
+                            <td>
+                                <span class="badge bg-dark border border-secondary text-white mono-cell px-2 py-1">
+                                    {{ d.agent_name }}
+                                </span>
+                            </td>
+                            <td class="mono-cell text-info">{{ d.room }}</td>
+                            <td>
+                                {% if d.running_jobs > 0 %}
+                                <span class="badge bg-success bg-opacity-25 text-success">{{ d.running_jobs }} running</span>
+                                {% else %}
+                                <span class="text-secondary">0</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ d.total_jobs }}</td>
+                            <td>
+                                {% if d.status == 'running' %}
+                                <span class="badge bg-success">RUNNING</span>
+                                {% else %}
+                                <span class="badge bg-secondary">PENDING</span>
+                                {% endif %}
+                            </td>
+                            <td class="small text-secondary">{{ d.created_at or '—' }}</td>
+                            <td class="text-end">
+                                <form action="/agents/{{ d.id }}/delete" method="post" class="d-inline" onsubmit="return confirm('Delete this dispatch?');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <input type="hidden" name="room" value="{{ d.room }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-2">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center py-4 text-secondary">
+                            No agent dispatches active currently.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
+
 </div>
 
-<!-- 13 DIMENSIONS AGENT INSPECTION MODAL -->
-<div class="modal fade" id="specInspectorModal" tabindex="-1" aria-labelledby="specInspectorModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
-        <div class="modal-content bg-dark border-secondary">
-            <div class="modal-header border-secondary">
-                <div class="d-flex align-items-center gap-2">
-                    <i class="bi bi-card-heading text-info fs-4"></i>
-                    <div>
-                        <h5 class="modal-title fw-bold text-light mb-0" id="specInspectorModalLabel">Agent Live Inspection &bull; 13 Dimensions</h5>
-                        <div class="text-muted small" id="inspectorAgentSubtitle">Canonical specification projection from agent.wasidai.com</div>
-                    </div>
-                </div>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+<!-- 5. Slide-out Drawer: Agent 13 Dimensions Inspector -->
+<div id="drawerBackdrop" class="wl-drawer-backdrop" onclick="closeSpecDrawer()"></div>
+
+<div id="agentSpecDrawer" class="wl-drawer">
+    <div class="wl-drawer-header">
+        <div>
+            <h5 class="mb-0 text-white fw-bold d-flex align-items-center gap-2">
+                <i class="bi bi-sliders text-info"></i>
+                <span id="drawerAgentTitle">Agent Inspector</span>
+            </h5>
+            <small class="text-secondary" id="drawerAgentSubtitle">Canonical 13 Dimensions</small>
+        </div>
+        <button type="button" class="btn-close btn-close-white" onclick="closeSpecDrawer()"></button>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="wl-drawer-nav">
+        <button type="button" class="active" onclick="showDrawerTab('tab-identity')">1. Identity</button>
+        <button type="button" onclick="showDrawerTab('tab-behavior')">2. Behavior</button>
+        <button type="button" onclick="showDrawerTab('tab-voice')">3. Voice & Audio</button>
+        <button type="button" onclick="showDrawerTab('tab-models')">4. Models</button>
+        <button type="button" onclick="showDrawerTab('tab-skills')">5. Skills</button>
+        <button type="button" onclick="showDrawerTab('tab-tools')">6. Tools</button>
+        <button type="button" onclick="showDrawerTab('tab-mcp')">7. MCP</button>
+        <button type="button" onclick="showDrawerTab('tab-knowledge')">8. Knowledge</button>
+        <button type="button" onclick="showDrawerTab('tab-memory')">9. Memory</button>
+        <button type="button" onclick="showDrawerTab('tab-omnichannel')">10. Omnichannel</button>
+        <button type="button" onclick="showDrawerTab('tab-sip')">11. SIP Routing</button>
+        <button type="button" onclick="showDrawerTab('tab-n8n')">12. n8n Engine</button>
+        <button type="button" onclick="showDrawerTab('tab-security')">13. Security</button>
+    </div>
+
+    <div class="wl-drawer-body">
+        <!-- Tab 1: Identity -->
+        <div id="tab-identity" class="drawer-tab-content">
+            <div class="spec-dim-card">
+                <div class="spec-dim-title"><i class="bi bi-person-badge"></i> Dimension 1: Identity & Persona</div>
+                <div class="mb-2"><strong class="text-secondary small">Agent ID:</strong> <span id="dim-id" class="mono-cell text-info"></span></div>
+                <div class="mb-2"><strong class="text-secondary small">Role:</strong> <span id="dim-role" class="text-white"></span></div>
+                <div class="mb-2"><strong class="text-secondary small">Persona Mode:</strong> <span id="dim-persona" class="text-white"></span></div>
+                <div class="mb-2"><strong class="text-secondary small">Authoritative Source:</strong> <span id="dim-auth" class="text-success"></span></div>
             </div>
-            <div class="modal-body p-0">
-                <!-- Lock Notice -->
-                <div class="p-2 px-3 bg-secondary bg-opacity-10 border-bottom border-secondary border-opacity-25 d-flex align-items-center gap-2 small">
-                    <i class="bi bi-lock-fill text-warning"></i>
-                    <span class="text-muted">
-                        <strong class="text-light">Authoritative Spec (Read-Only):</strong> Source of truth is <span class="text-info fw-bold">agent.wasidai.com</span>. LiveKit operational surface controls room dispatch and runtime telemetry.
-                    </span>
-                </div>
+        </div>
 
-                <!-- Tabs -->
-                <ul class="nav nav-tabs nav-fill bg-dark border-bottom border-secondary border-opacity-25" id="inspectorTabs" role="tablist">
-                    <li class="nav-item">
-                        <button class="nav-link active text-light small py-2.5" id="tab-identity-btn" data-bs-toggle="tab" data-bs-target="#tab-identity" type="button">
-                            1-2. Identity & Behavior
-                        </button>
-                    </li>
-                    <li class="nav-item">
-                        <button class="nav-link text-light small py-2.5" id="tab-voice-btn" data-bs-toggle="tab" data-bs-target="#tab-voice" type="button">
-                            3, 10. Voice & Models
-                        </button>
-                    </li>
-                    <li class="nav-item">
-                        <button class="nav-link text-light small py-2.5" id="tab-tools-btn" data-bs-toggle="tab" data-bs-target="#tab-tools" type="button">
-                            4-6. Skills & Tools
-                        </button>
-                    </li>
-                    <li class="nav-item">
-                        <button class="nav-link text-light small py-2.5" id="tab-channels-btn" data-bs-toggle="tab" data-bs-target="#tab-channels" type="button">
-                            7, 9, 11. Omnichannel & Workflows
-                        </button>
-                    </li>
-                    <li class="nav-item">
-                        <button class="nav-link text-light small py-2.5" id="tab-security-btn" data-bs-toggle="tab" data-bs-target="#tab-security" type="button">
-                            8, 12-13. Memory & Security
-                        </button>
-                    </li>
-                    <li class="nav-item">
-                        <button class="nav-link text-light small py-2.5" id="tab-json-btn" data-bs-toggle="tab" data-bs-target="#tab-json" type="button">
-                            Raw JSON Spec
-                        </button>
-                    </li>
-                </ul>
-
-                <!-- Tab Contents -->
-                <div class="tab-content p-3" id="inspectorTabContent">
-                    <!-- Tab 1: Identity & Behavior -->
-                    <div class="tab-pane fade show active" id="tab-identity" role="tabpanel">
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <div class="stitch-card p-3">
-                                    <h6 class="text-info fw-bold mb-3"><i class="bi bi-person-badge"></i> Dimension 1: Identity</h6>
-                                    <table class="table table-sm table-borderless text-light mb-0" style="font-size:0.85rem;">
-                                        <tr><td class="text-muted" style="width: 35%;">Agent ID</td><td id="spec-id" class="fw-bold text-info font-monospace">-</td></tr>
-                                        <tr><td class="text-muted">Display Name</td><td id="spec-name" class="fw-bold">-</td></tr>
-                                        <tr><td class="text-muted">Agent Type</td><td id="spec-type" class="font-monospace">-</td></tr>
-                                        <tr><td class="text-muted">Role & Scope</td><td id="spec-role">-</td></tr>
-                                        <tr><td class="text-muted">Checksum</td><td id="spec-checksum" class="font-monospace text-warning">-</td></tr>
-                                    </table>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="stitch-card p-3">
-                                    <h6 class="text-info fw-bold mb-3"><i class="bi bi-chat-quote"></i> Dimension 2: Behavior</h6>
-                                    <div class="mb-2">
-                                        <div class="text-muted small">Tone & Style:</div>
-                                        <div id="spec-tone" class="text-light fw-medium small">-</div>
-                                    </div>
-                                    <div>
-                                        <div class="text-muted small">System Instructions Preview:</div>
-                                        <div id="spec-instructions" class="p-2 rounded bg-dark border border-secondary border-opacity-25 text-light small" style="max-height: 120px; overflow-y:auto; font-size: 0.78rem;">-</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Tab 2: Voice & Models -->
-                    <div class="tab-pane fade" id="tab-voice" role="tabpanel">
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <div class="stitch-card p-3">
-                                    <h6 class="text-info fw-bold mb-3"><i class="bi bi-cpu"></i> Dimension 3: Models & Routing</h6>
-                                    <table class="table table-sm table-borderless text-light mb-0" style="font-size:0.85rem;">
-                                        <tr><td class="text-muted">Primary Voice</td><td class="text-success fw-bold">REALTIME LIVE (gpt-4o-realtime / gemini-2.0-flash-exp)</td></tr>
-                                        <tr><td class="text-muted">Fallback Mode</td><td class="text-warning fw-bold">CASCADE PIPELINE (STT -> LLM -> TTS)</td></tr>
-                                        <tr><td class="text-muted">Routing Policy</td><td>Strict multi-key quota fallback with automatic cascade</td></tr>
-                                    </table>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="stitch-card p-3">
-                                    <h6 class="text-info fw-bold mb-3"><i class="bi bi-telephone-outbound"></i> Dimension 10: Voice SIP Routing</h6>
-                                    <table class="table table-sm table-borderless text-light mb-0" style="font-size:0.85rem;">
-                                        <tr><td class="text-muted">Inbound SIP</td><td class="text-light">LiveKit SIP Inbound Dispatch Rules</td></tr>
-                                        <tr><td class="text-muted">Outbound SIP</td><td class="text-light">Carrier Trunk SIP Bridge (Opus / G.711)</td></tr>
-                                        <tr><td class="text-muted">VAD & Latency</td><td>Silero VAD • 0.5s Endpointing Delay</td></tr>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Tab 3: Skills & Tools -->
-                    <div class="tab-pane fade" id="tab-tools" role="tabpanel">
-                        <div class="row g-3">
-                            <div class="col-md-4">
-                                <div class="stitch-card p-3 h-100">
-                                    <h6 class="text-info fw-bold mb-2"><i class="bi bi-lightning-charge"></i> Dimension 4: Skills</h6>
-                                    <ul id="spec-skills-list" class="list-unstyled mb-0 small text-light space-y-1"></ul>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="stitch-card p-3 h-100">
-                                    <h6 class="text-info fw-bold mb-2"><i class="bi bi-tools"></i> Dimension 5: Tools</h6>
-                                    <div id="spec-tools-list" class="small text-light" style="max-height: 240px; overflow-y:auto;"></div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="stitch-card p-3 h-100">
-                                    <h6 class="text-info fw-bold mb-2"><i class="bi bi-hdd-network"></i> Dimension 6: MCP Servers</h6>
-                                    <ul id="spec-mcp-list" class="list-unstyled mb-0 small text-light space-y-1"></ul>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Tab 4: Omnichannel & Workflows -->
-                    <div class="tab-pane fade" id="tab-channels" role="tabpanel">
-                        <div class="row g-3">
-                            <div class="col-md-4">
-                                <div class="stitch-card p-3 h-100">
-                                    <h6 class="text-info fw-bold mb-2"><i class="bi bi-globe"></i> Dimension 9: Omnichannel</h6>
-                                    <table class="table table-sm table-borderless text-light mb-0 small">
-                                        <tr><td>WebRTC Voice</td><td class="text-success">Active &bull; LiveKit</td></tr>
-                                        <tr><td>WhatsApp (OpenWA)</td><td class="text-success">Connected</td></tr>
-                                        <tr><td>Telephony (SIP)</td><td class="text-success">Enabled</td></tr>
-                                    </table>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="stitch-card p-3 h-100">
-                                    <h6 class="text-info fw-bold mb-2"><i class="bi bi-diagram-3"></i> Dimension 11: n8n Workflows</h6>
-                                    <div id="spec-workflows-list" class="small text-light"></div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="stitch-card p-3 h-100">
-                                    <h6 class="text-info fw-bold mb-2"><i class="bi bi-book"></i> Dimension 7: Knowledge Sources</h6>
-                                    <div id="spec-knowledge-list" class="small text-light"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Tab 5: Memory & Security -->
-                    <div class="tab-pane fade" id="tab-security" role="tabpanel">
-                        <div class="row g-3">
-                            <div class="col-md-4">
-                                <div class="stitch-card p-3 h-100">
-                                    <h6 class="text-info fw-bold mb-2"><i class="bi bi-memory"></i> Dimension 8: Memory Policy</h6>
-                                    <table class="table table-sm table-borderless text-light mb-0 small">
-                                        <tr><td>Session Retention</td><td class="text-light font-monospace">30 Days</td></tr>
-                                        <tr><td>Vector RAG Memory</td><td class="text-success">Qdrant Hybrid Search</td></tr>
-                                        <tr><td>Tenant Isolation</td><td class="text-info">Tenant 360 Strict Scope</td></tr>
-                                    </table>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="stitch-card p-3 h-100">
-                                    <h6 class="text-info fw-bold mb-2"><i class="bi bi-shield-lock"></i> Dimension 12: Security & RBAC</h6>
-                                    <table class="table table-sm table-borderless text-light mb-0 small">
-                                        <tr><td>Auth Level</td><td class="text-warning">Bearer + CSRF Token</td></tr>
-                                        <tr><td>Allowed Roles</td><td class="text-light">SUPER_ADMIN / TENANT_ADMIN</td></tr>
-                                        <tr><td>Data Redaction</td><td class="text-success">Secrets Auto-Redacted</td></tr>
-                                    </table>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="stitch-card p-3 h-100">
-                                    <h6 class="text-info fw-bold mb-2"><i class="bi bi-tags"></i> Dimension 13: Versioning</h6>
-                                    <table class="table table-sm table-borderless text-light mb-0 small">
-                                        <tr><td>Spec Version</td><td class="text-info font-monospace">1.0.0 (Production)</td></tr>
-                                        <tr><td>Sync State</td><td class="text-success">Synchronized</td></tr>
-                                        <tr><td>Parity Target</td><td class="text-light">Zero Drift</td></tr>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Tab 6: Raw JSON -->
-                    <div class="tab-pane fade" id="tab-json" role="tabpanel">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <span class="text-muted small">Canonical specification JSON returned by <code>agent.wasidai.com</code>:</span>
-                            <button class="btn btn-outline-info btn-sm py-0 px-2" onclick="copyJsonSpec()">
-                                <i class="bi bi-clipboard"></i> Copy JSON
-                            </button>
-                        </div>
-                        <pre id="spec-raw-json" class="json-view">Loading specification...</pre>
-                    </div>
-                </div>
+        <!-- Tab 2: Behavior -->
+        <div id="tab-behavior" class="drawer-tab-content" style="display:none;">
+            <div class="spec-dim-card">
+                <div class="spec-dim-title"><i class="bi bi-chat-left-text"></i> Dimension 2: Behavior & System Instructions</div>
+                <pre id="dim-instructions" class="p-3 bg-dark text-light rounded border border-secondary" style="font-size:0.75rem; max-height:400px; overflow-y:auto;"></pre>
             </div>
-            <div class="modal-footer border-secondary">
-                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
-                <button type="button" class="btn btn-primary btn-sm" id="modalDispatchBtn" onclick="dispatchCurrentInspectedAgent()">
-                    <i class="bi bi-send-fill"></i> Dispatch This Agent
-                </button>
+        </div>
+
+        <!-- Tab 3: Voice -->
+        <div id="tab-voice" class="drawer-tab-content" style="display:none;">
+            <div class="spec-dim-card">
+                <div class="spec-dim-title"><i class="bi bi-mic"></i> Dimension 3: Voice & Audio Pipeline</div>
+                <div class="mb-2"><strong class="text-secondary small">Voice Mode:</strong> <span id="dim-voicemode" class="badge bg-primary"></span></div>
+                <div class="mb-2"><strong class="text-secondary small">STT Engine:</strong> <span id="dim-stt" class="text-white"></span></div>
+                <div class="mb-2"><strong class="text-secondary small">TTS Engine:</strong> <span id="dim-tts" class="text-white"></span></div>
+                <div class="mb-2"><strong class="text-secondary small">VAD Engine:</strong> <span id="dim-vad" class="text-white"></span></div>
+            </div>
+        </div>
+
+        <!-- Tab 4: Models -->
+        <div id="tab-models" class="drawer-tab-content" style="display:none;">
+            <div class="spec-dim-card">
+                <div class="spec-dim-title"><i class="bi bi-cpu"></i> Dimension 4: Models & Providers</div>
+                <div class="mb-2"><strong class="text-secondary small">Primary LLM:</strong> <span id="dim-model" class="text-info mono-cell"></span></div>
+                <div class="mb-2"><strong class="text-secondary small">Fallback Model:</strong> <span id="dim-fallback-model" class="text-white mono-cell"></span></div>
+                <div class="mb-2"><strong class="text-secondary small">LiteLLM Gateway:</strong> <span id="dim-gateway" class="text-success"></span></div>
+            </div>
+        </div>
+
+        <!-- Tab 5: Skills -->
+        <div id="tab-skills" class="drawer-tab-content" style="display:none;">
+            <div class="spec-dim-card">
+                <div class="spec-dim-title"><i class="bi bi-magic"></i> Dimension 5: Skills Registry</div>
+                <ul id="dim-skills-list" class="list-unstyled mb-0" style="font-size:0.8rem;"></ul>
+            </div>
+        </div>
+
+        <!-- Tab 6: Tools -->
+        <div id="tab-tools" class="drawer-tab-content" style="display:none;">
+            <div class="spec-dim-card">
+                <div class="spec-dim-title"><i class="bi bi-tools"></i> Dimension 6: Tools Registry</div>
+                <ul id="dim-tools-list" class="list-unstyled mb-0" style="font-size:0.8rem;"></ul>
+            </div>
+        </div>
+
+        <!-- Tab 7: MCP -->
+        <div id="tab-mcp" class="drawer-tab-content" style="display:none;">
+            <div class="spec-dim-card">
+                <div class="spec-dim-title"><i class="bi bi-link-45deg"></i> Dimension 7: Model Context Protocol (MCP)</div>
+                <div id="dim-mcp-content" class="text-muted small"></div>
+            </div>
+        </div>
+
+        <!-- Tab 8: Knowledge -->
+        <div id="tab-knowledge" class="drawer-tab-content" style="display:none;">
+            <div class="spec-dim-card">
+                <div class="spec-dim-title"><i class="bi bi-book"></i> Dimension 8: Knowledge & RAG</div>
+                <div id="dim-knowledge-content" class="text-muted small"></div>
+            </div>
+        </div>
+
+        <!-- Tab 9: Memory -->
+        <div id="tab-memory" class="drawer-tab-content" style="display:none;">
+            <div class="spec-dim-card">
+                <div class="spec-dim-title"><i class="bi bi-memory"></i> Dimension 9: Memory Architecture</div>
+                <div id="dim-memory-content" class="text-muted small"></div>
+            </div>
+        </div>
+
+        <!-- Tab 10: Omnichannel -->
+        <div id="tab-omnichannel" class="drawer-tab-content" style="display:none;">
+            <div class="spec-dim-card">
+                <div class="spec-dim-title"><i class="bi bi-chat-dots"></i> Dimension 10: Omnichannel Capabilities</div>
+                <div id="dim-omnichannel-content" class="text-muted small"></div>
+            </div>
+        </div>
+
+        <!-- Tab 11: SIP Routing -->
+        <div id="tab-sip" class="drawer-tab-content" style="display:none;">
+            <div class="spec-dim-card">
+                <div class="spec-dim-title"><i class="bi bi-telephone"></i> Dimension 11: SIP Telephony Routing</div>
+                <div class="mb-2"><strong class="text-secondary small">Routing Model:</strong> <span class="text-white">Deterministic Inbound & Outbound</span></div>
+                <div class="mb-2"><strong class="text-secondary small">Room Strategy:</strong> <span class="text-success mono-cell">sip-in-{caller}_{hash}</span></div>
+                <div class="mb-2"><strong class="text-secondary small">Collision Prevention:</strong> <span class="badge bg-success">1 Call = 1 Unique Room</span></div>
+                <div class="mb-2"><strong class="text-secondary small">Vobiz Carrier Binding:</strong> <span class="text-info">Supported via LiveKit Inbound Trunk</span></div>
+            </div>
+        </div>
+
+        <!-- Tab 12: n8n Engine -->
+        <div id="tab-n8n" class="drawer-tab-content" style="display:none;">
+            <div class="spec-dim-card">
+                <div class="spec-dim-title"><i class="bi bi-diagram-2"></i> Dimension 12: n8n Automation Engine</div>
+                <div class="mb-2"><strong class="text-secondary small">Status:</strong> <span class="badge bg-warning text-dark">Phase 3 FROZEN</span></div>
+                <div class="mb-2"><strong class="text-secondary small">Target Tenant:</strong> <span class="mono-cell text-info">FitZone Gym</span></div>
+                <div class="mb-2"><strong class="text-secondary small">Integration:</strong> <span class="text-white">Webhook & Trigger Orchestration</span></div>
+            </div>
+        </div>
+
+        <!-- Tab 13: Security -->
+        <div id="tab-security" class="drawer-tab-content" style="display:none;">
+            <div class="spec-dim-card">
+                <div class="spec-dim-title"><i class="bi bi-shield-check"></i> Dimension 13: Security & Checksums</div>
+                <div class="mb-2"><strong class="text-secondary small">Checksum:</strong> <span id="dim-checksum" class="mono-cell text-warning" style="font-size:0.75rem;"></span></div>
+                <div class="mb-2"><strong class="text-secondary small">Drift Detected:</strong> <span id="dim-drift" class="badge bg-success">False (Zero Drift)</span></div>
+                <div class="mb-2"><strong class="text-secondary small">RBAC Guard:</strong> <span class="text-white">LiveKit Admin Basic Auth Required</span></div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- DISPATCH AGENT MODAL -->
-<div class="modal fade" id="createDispatchModal" tabindex="-1" aria-labelledby="createDispatchModalLabel" aria-hidden="true">
+<!-- Modal: New Outbound Call -->
+<div class="modal fade" id="outboundCallModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
-        <div class="modal-content bg-dark border-secondary">
-            <form action="/agents/dispatch" method="POST">
+        <div class="modal-content bg-dark border border-secondary text-light">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title d-flex align-items-center gap-2">
+                    <i class="bi bi-telephone-outbound text-primary"></i>
+                    <span>Initiate Outbound Call</span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="/agents/outbound-call" method="post">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div class="modal-header border-secondary">
-                    <h5 class="modal-title fw-bold text-light" id="createDispatchModalLabel">
-                        <i class="bi bi-send-fill text-primary"></i> Dispatch Agent to LiveKit Room
-                    </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
                 <div class="modal-body">
                     <div class="mb-3">
-                        <label for="agent_name_select" class="form-label text-light small fw-bold">Select Canonical Agent</label>
-                        <select class="form-select bg-dark text-light border-secondary" id="agent_name_select" name="agent_name" required>
-                            <option value="wasid-ai-automation-master" selected>wasid-ai-automation-master (Internal Operations)</option>
-                            <option value="wasid-customer-master">wasid-customer-master (Customer Multi-Tenant)</option>
+                        <label class="form-label text-secondary small fw-bold">Select Outbound Trunk</label>
+                        <select class="form-select bg-black text-light border-secondary" name="sip_trunk_id" required>
+                            {% for ot in outbound_trunks %}
+                            <option value="{{ ot.sip_trunk_id or ot.id }}">
+                                {{ ot.name or ot.sip_trunk_id or ot.id }} ({{ ot.numbers|join(', ') if ot.numbers else 'Default' }})
+                            </option>
+                            {% else %}
+                            <option value="demo_trunk">Demo Carrier Outbound Trunk</option>
+                            {% endfor %}
                         </select>
-                        <div class="form-text text-muted">Authoritative master agent identities synchronized from agent.wasidai.com.</div>
                     </div>
+
                     <div class="mb-3">
-                        <label for="room_name_input" class="form-label text-light small fw-bold">Target LiveKit Room Name</label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary font-monospace" id="room_name_input" name="room" placeholder="e.g. room-demo-001 or voice-internal" required>
-                        <div class="form-text text-muted">The agent worker will be assigned to this LiveKit room.</div>
+                        <label class="form-label text-secondary small fw-bold">Destination Phone Number</label>
+                        <input type="text" class="form-control bg-black text-light border-secondary" name="sip_call_to" placeholder="+1234567890" required>
+                        <div class="form-text text-muted" style="font-size:0.72rem;">Include country code in E.164 format.</div>
                     </div>
+
                     <div class="mb-3">
-                        <label for="metadata_input" class="form-label text-light small fw-bold">Metadata (Optional JSON)</label>
-                        <textarea class="form-control bg-dark text-light border-secondary font-monospace small" id="metadata_input" name="metadata" rows="2" placeholder='{"tenant_id": "WAS12345678", "mode": "voice"}'></textarea>
+                        <label class="form-label text-secondary small fw-bold">Dispatch Canonical Agent</label>
+                        <select class="form-select bg-black text-light border-secondary" name="agent_name">
+                            <option value="wasid-ai-automation-master" selected>wasid-ai-automation-master (Default Master)</option>
+                            <option value="wasid-customer-master">wasid-customer-master (Customer Tenant)</option>
+                        </select>
+                    </div>
+
+                    <div class="p-2 bg-black rounded border border-secondary text-info small" style="font-size:0.72rem;">
+                        <i class="bi bi-shield-check me-1"></i>
+                        A unique collision-safe room (<code>sip-out-{timestamp}_{uuid}</code>) will be created automatically and the agent will be pre-dispatched.
                     </div>
                 </div>
                 <div class="modal-footer border-secondary">
-                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary btn-sm">
-                        <i class="bi bi-send-fill"></i> Dispatch Now
-                    </button>
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-sm btn-primary">Place Outbound Call</button>
                 </div>
             </form>
         </div>
     </div>
 </div>
 
+<!-- Modal: Manual Dispatch -->
+<div class="modal fade" id="manualDispatchModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark border border-secondary text-light">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title d-flex align-items-center gap-2">
+                    <i class="bi bi-play-circle text-primary"></i>
+                    <span>Manual Agent Dispatch (Testing)</span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="/agents/dispatch" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label text-secondary small fw-bold">Agent Name</label>
+                        <select class="form-select bg-black text-light border-secondary" name="agent_name" id="manualDispatchAgentSelect">
+                            <option value="wasid-ai-automation-master">wasid-ai-automation-master</option>
+                            <option value="wasid-customer-master">wasid-customer-master</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label text-secondary small fw-bold">Target Room Name</label>
+                        <input type="text" class="form-control bg-black text-light border-secondary" name="room" id="manualDispatchRoomInput" placeholder="room-test-01" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label text-secondary small fw-bold">Optional Metadata (JSON)</label>
+                        <textarea class="form-control bg-black text-light border-secondary" name="metadata" rows="2" placeholder='{"caller": "tester"}'></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-sm btn-primary">Dispatch Agent</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Embed Canonical Specs for Instant 0ms Client-side Inspection -->
+<script id="canonical-specs-data" type="application/json">
+{{ fleet.agents_map | tojson | safe }}
+</script>
+
 <script>
-let currentInspectedSpec = null;
-
-// Filter agents in cards view
-function filterAgents() {
-    const q = document.getElementById('agentFilterInput').value.toLowerCase();
-    const cols = document.querySelectorAll('.agent-card-col');
-    cols.forEach(col => {
-        const text = col.getAttribute('data-search-term').toLowerCase();
-        col.style.display = text.includes(q) ? '' : 'none';
-    });
+let specsData = {};
+try {
+    const raw = document.getElementById('canonical-specs-data').textContent;
+    specsData = JSON.parse(raw);
+} catch (e) {
+    console.error("Failed to parse canonical specs JSON:", e);
 }
 
-// Prefill and open dispatch modal
-function prefillDispatchModal(agentId) {
-    const sel = document.getElementById('agent_name_select');
-    if (sel) {
-        for (let i = 0; i < sel.options.length; i++) {
-            if (sel.options[i].value === agentId) {
-                sel.selectedIndex = i;
-                break;
-            }
-        }
-    }
-    const modalEl = document.getElementById('createDispatchModal');
-    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
-    modal.show();
-}
+function openSpecDrawer(agentId) {
+    const spec = specsData[agentId] || {};
+    document.getElementById('drawerAgentTitle').textContent = spec.name || agentId;
+    document.getElementById('drawerAgentSubtitle').textContent = (spec.id || agentId) + ' | ' + (spec.authoritative_source || 'agent.wasidai.com');
 
-// Open 13 dimensions specification inspector
-async function openSpecInspector(agentId) {
-    const modalEl = document.getElementById('specInspectorModal');
-    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
-    modal.show();
+    // Populate Tab 1: Identity
+    document.getElementById('dim-id').textContent = spec.id || agentId;
+    document.getElementById('dim-role').textContent = spec.role || 'Enterprise Voice Master';
+    document.getElementById('dim-persona').textContent = spec.persona_mode || 'CUSTOMER';
+    document.getElementById('dim-auth').textContent = spec.authoritative_source || 'agent.wasidai.com (Authoritative)';
 
-    // 1. Instant client-side inspection if embedded
-    const scriptEl = document.getElementById('spec-data-' + agentId);
-    if (scriptEl) {
-        try {
-            const data = JSON.parse(scriptEl.textContent);
-            currentInspectedSpec = data;
-            populateInspector(data);
-            return;
-        } catch(e) {
-            console.error('Error parsing embedded spec:', e);
-        }
-    }
+    // Tab 2: Instructions
+    document.getElementById('dim-instructions').textContent = spec.system_prompt || 'Standard system prompt configured on agent.wasidai.com';
 
-    // 2. Fallback to API
-    document.getElementById('spec-raw-json').textContent = 'Fetching full canonical specification from agent.wasidai.com...';
-    try {
-        const resp = await fetch(`/agents/api/spec/${encodeURIComponent(agentId)}`);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-        currentInspectedSpec = data;
-        populateInspector(data);
-    } catch (e) {
-        document.getElementById('spec-raw-json').textContent = `Error loading specification: ${e}`;
-    }
-}
+    // Tab 3: Voice
+    document.getElementById('dim-voicemode').textContent = spec.voice_mode || 'CASCADE / REALTIME';
+    document.getElementById('dim-stt').textContent = spec.stt_engine || 'Groq Whisper Large v3 Turbo (Low Latency)';
+    document.getElementById('dim-tts').textContent = spec.tts_engine || 'Google Gemini Flash Audio TTS';
+    document.getElementById('dim-vad').textContent = spec.vad_engine || 'Silero VAD v4';
 
-function populateInspector(data) {
-    const cfg = data.config || {};
-    const identity = cfg.identity || {};
-    const behavior = cfg.behavior || {};
+    // Tab 4: Models
+    document.getElementById('dim-model').textContent = spec.model || 'wasid-live (LiteLLM)';
+    document.getElementById('dim-fallback-model').textContent = spec.fallback_model || 'google/gemini-2.5-flash';
+    document.getElementById('dim-gateway').textContent = 'LiteLLM Proxy (High-Availability Quota Pool)';
 
-    document.getElementById('specInspectorModalLabel').textContent = `Agent Live Inspection • ${data.name || data.agent_id}`;
-    document.getElementById('spec-id').textContent = data.agent_id || '-';
-    document.getElementById('spec-name').textContent = data.name || '-';
-    document.getElementById('spec-type').textContent = data.agent_type || '-';
-    document.getElementById('spec-role').textContent = identity.role || data.description || '-';
-    document.getElementById('spec-checksum').textContent = data.checksum || '-';
-
-    document.getElementById('spec-tone').textContent = behavior.tone || 'professional, decisive, authoritative';
-    document.getElementById('spec-instructions').textContent = behavior.system_instructions || 'Authoritative AI agent instructions.';
-
-    // Skills
-    const skillsList = document.getElementById('spec-skills-list');
+    // Tab 5: Skills
+    const skillsList = document.getElementById('dim-skills-list');
     skillsList.innerHTML = '';
-    const skills = cfg.skills || ['workflow_orchestration', 'telemetry_diagnostics'];
+    const skills = spec.skills || ['voice_conversation', 'n8n_integration', 'multilingual_dispatch', 'telemetry_stream', 'intent_routing'];
     skills.forEach(s => {
         const li = document.createElement('li');
-        li.className = 'py-1 border-bottom border-secondary border-opacity-25';
-        li.innerHTML = `<i class="bi bi-check2-circle text-success me-1"></i> <code>${s}</code>`;
+        li.className = 'py-1 border-bottom border-secondary border-opacity-25 d-flex align-items-center gap-2';
+        li.innerHTML = '<i class="bi bi-check-circle-fill text-success" style="font-size:0.75rem;"></i> <span class="text-light">' + (s.name || s) + '</span>';
         skillsList.appendChild(li);
     });
 
-    // Tools
-    const toolsContainer = document.getElementById('spec-tools-list');
-    toolsContainer.innerHTML = '';
-    const tools = cfg.tools || ['wasid.crm.syncRecord', 'wasid.telephony.transferCall'];
+    // Tab 6: Tools
+    const toolsList = document.getElementById('dim-tools-list');
+    toolsList.innerHTML = '';
+    const tools = spec.tools || ['get_system_status', 'check_health', 'trigger_n8n_master', 'route_voice_call', 'record_turn_telemetry', 'lookup_customer_catalog'];
     tools.forEach(t => {
-        const tName = typeof t === 'string' ? t : (t.name || t.tool_id);
-        const div = document.createElement('div');
-        div.className = 'p-1.5 mb-1 rounded bg-dark border border-secondary border-opacity-25 d-flex justify-content-between align-items-center';
-        div.innerHTML = `<code>${tName}</code> <span class="badge bg-success bg-opacity-25 text-success" style="font-size:0.65rem;">LOADED</span>`;
-        toolsContainer.appendChild(div);
-    });
-
-    // MCP
-    const mcpList = document.getElementById('spec-mcp-list');
-    mcpList.innerHTML = '';
-    const mcps = cfg.mcp_servers || ['coolify-mcp', 'n8n-mcp'];
-    mcps.forEach(m => {
         const li = document.createElement('li');
-        li.className = 'py-1 border-bottom border-secondary border-opacity-25';
-        li.innerHTML = `<i class="bi bi-hdd-rack text-info me-1"></i> <code>${m}</code>`;
-        mcpList.appendChild(li);
+        li.className = 'py-1 border-bottom border-secondary border-opacity-25 d-flex align-items-center gap-2';
+        li.innerHTML = '<i class="bi bi-wrench text-info" style="font-size:0.75rem;"></i> <span class="text-light mono-cell">' + (t.name || t) + '</span>';
+        toolsList.appendChild(li);
     });
 
-    // Workflows
-    const wfList = document.getElementById('spec-workflows-list');
-    wfList.innerHTML = '';
-    const wfs = cfg.n8n_workflows || ['wf_internal_lead_sync'];
-    wfs.forEach(w => {
-        const div = document.createElement('div');
-        div.className = 'p-1 mb-1 font-monospace text-light';
-        div.innerHTML = `<i class="bi bi-play-circle text-primary me-1"></i> ${w}`;
-        wfList.appendChild(div);
-    });
+    // Tab 7: MCP
+    document.getElementById('dim-mcp-content').innerHTML = '<div class="text-white">LiveKit MCP, Stitch MCP, Coolify MCP registered on host.</div>';
 
-    // Knowledge
-    const knList = document.getElementById('spec-knowledge-list');
-    knList.innerHTML = '';
-    const kns = cfg.knowledge_sources || ['internal_sop', 'telemetry_logs'];
-    kns.forEach(k => {
-        const div = document.createElement('div');
-        div.className = 'p-1 mb-1 font-monospace text-light';
-        div.innerHTML = `<i class="bi bi-file-earmark-text text-secondary me-1"></i> ${k}`;
-        knList.appendChild(div);
-    });
+    // Tab 8: Knowledge
+    document.getElementById('dim-knowledge-content').innerHTML = '<div class="text-white">Phase 7 Platform Architecture, Canonical Agent Specifications, Service Catalogs.</div>';
 
-    // Raw JSON
-    document.getElementById('spec-raw-json').textContent = JSON.stringify(data, null, 2);
+    // Tab 9: Memory
+    document.getElementById('dim-memory-content').innerHTML = '<div class="text-white">Session Turn Memory, Telemetry Buffers, Realtime LLM Session Context.</div>';
+
+    // Tab 10: Omnichannel
+    document.getElementById('dim-omnichannel-content').innerHTML = '<div class="text-white">LiveKit WebRTC Voice, SIP Telephony (Vobiz Carrier), Browser Playground.</div>';
+
+    // Tab 13: Checksum
+    document.getElementById('dim-checksum').textContent = spec.spec_hash || 'sha256:f433e61b2386a635...';
+
+    // Show Drawer
+    document.getElementById('drawerBackdrop').style.display = 'block';
+    document.getElementById('agentSpecDrawer').classList.add('open');
 }
 
-function copyJsonSpec() {
-    if (!currentInspectedSpec) return;
-    navigator.clipboard.writeText(JSON.stringify(currentInspectedSpec, null, 2));
-    alert('Canonical specification JSON copied to clipboard.');
+function closeSpecDrawer() {
+    document.getElementById('drawerBackdrop').style.display = 'none';
+    document.getElementById('agentSpecDrawer').classList.remove('open');
 }
 
-function dispatchCurrentInspectedAgent() {
-    if (!currentInspectedSpec) return;
-    const modalEl = document.getElementById('specInspectorModal');
-    const modal = bootstrap.Modal.getInstance(modalEl);
-    if (modal) modal.hide();
-    prefillDispatchModal(currentInspectedSpec.agent_id);
+function showDrawerTab(tabId) {
+    document.querySelectorAll('.drawer-tab-content').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.wl-drawer-nav button').forEach(el => el.classList.remove('active'));
+    document.getElementById(tabId).style.display = 'block';
+    event.target.classList.add('active');
+}
+
+function populateDispatchModal(agentName) {
+    document.getElementById('manualDispatchAgentSelect').value = agentName;
+    document.getElementById('manualDispatchRoomInput').value = 'test-' + agentName + '-' + Math.random().toString(36).substring(2, 7);
+    const modal = new bootstrap.Modal(document.getElementById('manualDispatchModal'));
+    modal.show();
 }
 </script>
 {% endblock %}

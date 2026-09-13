@@ -30,12 +30,15 @@ async def sip_outbound_index(
 
     trunks = await lk.list_sip_trunks()
     current_user = get_current_user(request)
+    from app.services.sip_routing import sip_routing_service
+    routing_matrix = await sip_routing_service.get_voice_routing_matrix(lk)
 
     return request.app.state.templates.TemplateResponse(request, 
         "sip/outbound.html.j2",
         {
             "request": request,
             "trunks": trunks,
+            "routing_matrix": routing_matrix,
             "current_user": current_user,
             "csrf_token": get_csrf_token(request),
             "flash_message": flash_message,
@@ -50,27 +53,49 @@ async def create_sip_call(
     csrf_token: str = Form(...),
     sip_trunk_id: str = Form(...),
     sip_call_to: str = Form(...),
-    room_name: str = Form(...),
-    participant_identity: str = Form(...),
+    room_name: Optional[str] = Form(None),
+    participant_identity: Optional[str] = Form(None),
+    agent_name: Optional[str] = Form("wasid-ai-automation-master"),
     lk: LiveKitClient = Depends(get_livekit_client),
 ):
-    """Create an outbound SIP call"""
+    """Create an outbound SIP call enforcing unique room and agent dispatch."""
     await verify_csrf_token(request)
 
     if not lk.sip_enabled:
         return RedirectResponse(url="/", status_code=303)
 
     try:
-        await lk.create_sip_participant(
-            sip_trunk_id=sip_trunk_id,
-            sip_call_to=sip_call_to,
-            room_name=room_name,
-            participant_identity=participant_identity,
-        )
+        from app.services.sip_routing import sip_routing_service, CANONICAL_MASTER_AGENT
+        target_agent = agent_name.strip() if agent_name else CANONICAL_MASTER_AGENT
+        clean_room = room_name.strip() if room_name else None
+
+        if not clean_room:
+            res = await sip_routing_service.initiate_outbound_call(
+                lk=lk,
+                sip_trunk_id=sip_trunk_id.strip(),
+                sip_call_to=sip_call_to.strip(),
+                agent_name=target_agent,
+                participant_identity=participant_identity.strip() if participant_identity else None,
+            )
+            success_msg = quote(f"Outbound call placed to {sip_call_to} in unique room '{res['room_name']}' with agent '{target_agent}'.")
+            return RedirectResponse(url=f"/sip-outbound?flash_message={success_msg}&flash_type=success", status_code=303)
+        else:
+            try:
+                await lk.create_dispatch(agent_name=target_agent, room=clean_room)
+            except Exception:
+                pass
+            await lk.create_sip_participant(
+                sip_trunk_id=sip_trunk_id.strip(),
+                sip_call_to=sip_call_to.strip(),
+                room_name=clean_room,
+                participant_identity=participant_identity.strip() if participant_identity else f"sip-{sip_call_to}",
+            )
+            success_msg = quote(f"Outbound call placed to {sip_call_to} in room '{clean_room}' with agent '{target_agent}'.")
+            return RedirectResponse(url=f"/sip-outbound?flash_message={success_msg}&flash_type=success", status_code=303)
     except Exception as e:
         logger.warning("Error creating SIP call: %s", e)
-
-    return RedirectResponse(url="/sip-outbound", status_code=303)
+        encoded_error = quote(f"Failed to place outbound call: {str(e)}")
+        return RedirectResponse(url=f"/sip-outbound?flash_message={encoded_error}&flash_type=danger", status_code=303)
 
 
 @router.post("/sip-outbound/trunk/create", dependencies=[Depends(requires_admin)])
@@ -330,6 +355,8 @@ async def sip_inbound_index(
     rules = await lk.list_sip_dispatch_rules()
     trunks = await lk.list_sip_inbound_trunks()
     current_user = get_current_user(request)
+    from app.services.sip_routing import sip_routing_service
+    routing_matrix = await sip_routing_service.get_voice_routing_matrix(lk)
 
     return request.app.state.templates.TemplateResponse(request, 
         "sip/inbound.html.j2",
@@ -337,6 +364,7 @@ async def sip_inbound_index(
             "request": request,
             "rules": rules,
             "trunks": trunks,
+            "routing_matrix": routing_matrix,
             "current_user": current_user,
             "csrf_token": get_csrf_token(request),
             "flash_message": flash_message,
@@ -730,3 +758,23 @@ async def delete_dispatch_rule(
         return RedirectResponse(
             url=f"/sip-inbound?flash_message={encoded_error}&flash_type=danger", status_code=303
         )
+
+
+@router.post("/sip-inbound/provision-vobiz", dependencies=[Depends(requires_admin)])
+async def provision_vobiz_inbound(
+    request: Request,
+    csrf_token: str = Form(...),
+    lk: LiveKitClient = Depends(get_livekit_client),
+):
+    """Ensure canonical Vobiz individual dispatch rule is configured."""
+    await verify_csrf_token(request)
+    if not lk.sip_enabled:
+        return RedirectResponse(url="/", status_code=303)
+    try:
+        from app.services.sip_routing import sip_routing_service
+        res = await sip_routing_service.provision_vobiz_canonical_rule(lk)
+        msg = quote(f"Vobiz SIP Inbound Rule '{res['name']}' provisioned -> target: {res['agent_name']} ({res['room_strategy']}).")
+        return RedirectResponse(url=f"/sip-inbound?flash_message={msg}&flash_type=success", status_code=303)
+    except Exception as e:
+        err = quote(f"Failed to provision Vobiz rule: {str(e)}")
+        return RedirectResponse(url=f"/sip-inbound?flash_message={err}&flash_type=danger", status_code=303)
