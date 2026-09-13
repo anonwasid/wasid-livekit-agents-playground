@@ -244,6 +244,9 @@
 
 <div class="row g-4 mb-5" id="canonical-agents-row">
     {% for agent in canonical_agents %}
+    <!-- Hidden JSON spec tag for instant 0ms inspector loading -->
+    <script type="application/json" id="spec-data-{{ agent.agent_id }}">{{ agent | tojson | safe }}</script>
+
     <div class="col-lg-6 agent-card-col" data-agent-id="{{ agent.agent_id }}" data-search-term="{{ agent.name }} {{ agent.agent_id }} {{ agent.description }} {{ agent.display_subtitle }}">
         <div class="stitch-card p-4 h-100 d-flex flex-column justify-content-between {% if loop.first %}stitch-card-active{% endif %}">
             <div>
@@ -708,8 +711,21 @@ async function openSpecInspector(agentId) {
     const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
     modal.show();
 
-    document.getElementById('spec-raw-json').textContent = 'Fetching full canonical specification from agent.wasidai.com...';
+    // 1. Instant client-side inspection if embedded
+    const scriptEl = document.getElementById('spec-data-' + agentId);
+    if (scriptEl) {
+        try {
+            const data = JSON.parse(scriptEl.textContent);
+            currentInspectedSpec = data;
+            populateInspector(data);
+            return;
+        } catch(e) {
+            console.error('Error parsing embedded spec:', e);
+        }
+    }
 
+    // 2. Fallback to API
+    document.getElementById('spec-raw-json').textContent = 'Fetching full canonical specification from agent.wasidai.com...';
     try {
         const resp = await fetch(`/agents/api/spec/${encodeURIComponent(agentId)}`);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -733,7 +749,7 @@ function populateInspector(data) {
     document.getElementById('spec-role').textContent = identity.role || data.description || '-';
     document.getElementById('spec-checksum').textContent = data.checksum || '-';
 
-    document.getElementById('spec-tone').textContent = behavior.tone || 'professional, decisive';
+    document.getElementById('spec-tone').textContent = behavior.tone || 'professional, decisive, authoritative';
     document.getElementById('spec-instructions').textContent = behavior.system_instructions || 'Authoritative AI agent instructions.';
 
     // Skills
