@@ -35,7 +35,7 @@ class StorageR2Service:
         region: str = "auto",
     ):
         self.endpoint = (endpoint if endpoint is not None else os.getenv("R2_ENDPOINT", DEFAULT_R2_ENDPOINT)).rstrip("/")
-        self.bucket = bucket if bucket is not None else os.getenv("R2_BUCKET", "wasid-voice-recordings")
+        self.bucket = bucket if bucket is not None else os.getenv("R2_BUCKET", "n8n-production-backups")
         self.access_key = access_key if access_key is not None else os.getenv("R2_ACCESS_KEY_ID", "")
         self.secret_key = secret_key if secret_key is not None else os.getenv("R2_SECRET_ACCESS_KEY", "")
         self.region = region or os.getenv("R2_REGION", "auto")

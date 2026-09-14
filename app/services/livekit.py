@@ -257,7 +257,7 @@ class LiveKitClient:
         """Start a room composite egress with direct Cloudflare R2 / S3 upload."""
         lk = await self._get_api()
 
-        s3_bucket = s3_bucket or os.getenv("R2_BUCKET", "wasid-voice-recordings")
+        s3_bucket = s3_bucket or os.getenv("R2_BUCKET", "n8n-production-backups")
         s3_access_key = s3_access_key or os.getenv("R2_ACCESS_KEY_ID", "")
         s3_secret = s3_secret or os.getenv("R2_SECRET_ACCESS_KEY", "")
         s3_endpoint = s3_endpoint or os.getenv("R2_ENDPOINT", "")

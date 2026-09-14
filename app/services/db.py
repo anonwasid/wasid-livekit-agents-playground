@@ -134,7 +134,7 @@ class CallRecordingRecord(Base):
     duration_seconds = Column(Integer, nullable=False, default=0)
     file_size_bytes = Column(Integer, nullable=False, default=0)
     storage_provider = Column(String(32), nullable=False, default="cloudflare_r2")
-    storage_bucket = Column(String(128), nullable=False, default="wasid-voice-recordings")
+    storage_bucket = Column(String(128), nullable=False, default="n8n-production-backups")
     storage_object_key = Column(String(256), nullable=True)
     media_url = Column(String(512), nullable=True)
     started_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -418,7 +418,7 @@ class TelephonyDatabase:
         tenant_id: str = "wasid-hq",
         agent_id: str = "wasid-ai-automation-master",
         status: str = "recording",
-        storage_bucket: str = "wasid-voice-recordings",
+        storage_bucket: str = "n8n-production-backups",
         storage_object_key: Optional[str] = None,
         duration_seconds: int = 0,
         file_size_bytes: int = 0,

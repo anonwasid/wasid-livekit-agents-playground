@@ -103,7 +103,7 @@ audio::-webkit-media-controls-time-remaining-display {
                 {{ (stats.total_file_size_bytes / 1024) | round(1) }} KB
             {% endif %}
         </div>
-        <small class="text-muted">Bucket: wasid-voice-recordings</small>
+        <small class="text-muted">Direct Cloudflare R2 Storage</small>
     </div>
 </div>
 
@@ -346,7 +346,7 @@ audio::-webkit-media-controls-time-remaining-display {
                     <div class="form-group mb-3">
                         <label class="form-label">Output Filename *</label>
                         <input type="text" class="form-control" name="output_filename" placeholder="manual-{room}-{time}.m4a" required>
-                        <small class="text-muted">Saved directly into Cloudflare R2 bucket wasid-voice-recordings</small>
+                        <small class="text-muted">Saved directly into Cloudflare R2 storage</small>
                     </div>
                     <div class="form-group mb-3">
                         <label class="form-label">Layout</label>
