@@ -130,7 +130,7 @@ CANONICAL_DID_SEEDS = [
         "agent_id": "wasid-customer-master",
         "provider": "vobiz",
         "inbound_trunk_id": None,
-        "dispatch_rule_id": None,
+        "dispatch_rule_id": "SDR_8N7DJE97PAze",
         "room_prefix": "sip-in-",
     },
     {
@@ -140,7 +140,7 @@ CANONICAL_DID_SEEDS = [
         "agent_id": "wasid-customer-master",
         "provider": "vobiz",
         "inbound_trunk_id": None,
-        "dispatch_rule_id": None,
+        "dispatch_rule_id": "SDR_8N7DJE97PAze",
         "room_prefix": "sip-in-",
     },
     {
@@ -150,7 +150,7 @@ CANONICAL_DID_SEEDS = [
         "agent_id": "wasid-customer-master",
         "provider": "vobiz",
         "inbound_trunk_id": None,
-        "dispatch_rule_id": None,
+        "dispatch_rule_id": "SDR_8N7DJE97PAze",
         "room_prefix": "sip-in-",
     },
     {
@@ -160,7 +160,7 @@ CANONICAL_DID_SEEDS = [
         "agent_id": "wasid-customer-master",
         "provider": "vobiz",
         "inbound_trunk_id": None,
-        "dispatch_rule_id": None,
+        "dispatch_rule_id": "SDR_8N7DJE97PAze",
         "room_prefix": "sip-in-",
     },
     {
@@ -170,7 +170,7 @@ CANONICAL_DID_SEEDS = [
         "agent_id": "wasid-customer-master",
         "provider": "vobiz",
         "inbound_trunk_id": None,
-        "dispatch_rule_id": None,
+        "dispatch_rule_id": "SDR_8N7DJE97PAze",
         "room_prefix": "sip-in-",
     },
     {
