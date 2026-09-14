@@ -1,314 +1,371 @@
 {% extends "base.html.j2" %}
 
-{% block title %}Egress - LiveKit Dashboard{% endblock %}
+{% block title %}Call Recordings & Egress - LiveKit Dashboard{% endblock %}
 
-{% block page_title %}Egress{% endblock %}
+{% block page_title %}Call Recordings{% endblock %}
 
 {% block page_subtitle %}
-<p class="page-subtitle">Recording & Streaming Jobs</p>
+<p class="page-subtitle">Automatic Cloudflare R2 Call Recordings & LiveKit Egress Jobs</p>
 {% endblock %}
 
 {% block content %}
-<!-- Stats -->
-<div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+<!-- Live Pulse CSS -->
+<style>
+@keyframes pulse-red {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+.badge-recording {
+    background-color: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+    border: 1px solid #ef4444;
+    animation: pulse-red 2s infinite;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.badge-inbound {
+    background-color: rgba(6, 182, 212, 0.15);
+    color: #06b6d4;
+    border: 1px solid rgba(6, 182, 212, 0.3);
+}
+.badge-outbound {
+    background-color: rgba(168, 85, 247, 0.15);
+    color: #a855f7;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+}
+.audio-player-container audio {
+    height: 32px;
+    max-width: 220px;
+    border-radius: 16px;
+    outline: none;
+}
+audio::-webkit-media-controls-panel {
+    background-color: var(--bg-tertiary, #1e293b);
+}
+audio::-webkit-media-controls-current-time-display,
+audio::-webkit-media-controls-time-remaining-display {
+    color: #f8fafc;
+}
+</style>
+
+<!-- Stats Grid -->
+<div class="stats-grid mb-4" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
     <div class="stat-card">
         <div class="stat-label">
-            <i class="bi bi-record-circle"></i> Total Egress Jobs
+            <i class="bi bi-disc text-primary"></i> Total Recordings
         </div>
         <div class="stat-value info">
-            {{ egress_jobs|length }}
+            {{ stats.total_recordings }}
         </div>
+        <small class="text-muted">Stored in Cloudflare R2</small>
     </div>
-</div>
 
-<!-- Egress Jobs Table -->
-<div id="egress-table">
-    <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="card-title">
-                <i class="bi bi-record-circle"></i> Egress Jobs
-            </h5>
-            <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#startEgressModal">
-                <i class="bi bi-plus-circle"></i> Start Egress
-            </button>
+    <div class="stat-card">
+        <div class="stat-label">
+            <i class="bi bi-telephone-inbound text-info"></i> Inbound / Outbound
         </div>
-        <div class="card-body">
-            {% if egress_jobs %}
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Egress ID</th>
-                            <th>Room</th>
-                            <th>Status</th>
-                            <th>Started</th>
-                            <th>Duration</th>
-                            <th>File</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for job in egress_jobs %}
-                        <tr>
-                            <td>
-                                <code style="color: var(--text-secondary); background-color: var(--bg-tertiary); padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.8125rem;">
-                                    {{ job.egress_id[:16] }}...
-                                </code>
-                            </td>
-                            <td>
-                                <strong style="color: var(--text-primary);">{{ job.room_name or '-' }}</strong>
-                            </td>
-                            <td>
-                                {% if job.status == 'EGRESS_ACTIVE' %}
-                                <span class="badge badge-success">{{ job.status }}</span>
-                                {% elif job.status == 'EGRESS_COMPLETE' %}
-                                <span class="badge badge-primary">{{ job.status }}</span>
-                                {% else %}
-                                <span class="badge badge-warning">{{ job.status }}</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                <small style="color: var(--text-secondary);">{{ job.started_at }}</small>
-                            </td>
-                            <td>
-                                {% if job.ended_at %}
-                                <span style="color: var(--text-secondary);">{{ ((job.ended_at - job.started_at) / 1000000000) | round(1) }}s</span>
-                                {% else %}
-                                <span class="text-muted">-</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% if job.file_results %}
-                                    {% for file in job.file_results %}
-                                    <div style="margin-bottom: 0.5rem;">
-                                        <small style="color: var(--text-secondary);">{{ file.filename }}</small>
-                                        {% if file.download_url %}
-                                        <br><a href="{{ file.download_url }}" target="_blank" class="btn btn-sm btn-outline-primary" style="margin-top: 0.25rem;">
-                                            <i class="bi bi-download"></i> Download
-                                        </a>
-                                        {% endif %}
-                                    </div>
-                                    {% endfor %}
-                                {% else %}
-                                <span class="text-muted">-</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% if job.status == 'EGRESS_ACTIVE' %}
-                                <form method="post" action="/egress/{{ job.egress_id }}/stop" style="display: inline;">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger" 
-                                            onclick="return confirm('Stop this egress job?')">
-                                        <i class="bi bi-stop-circle"></i> Stop
-                                    </button>
-                                </form>
-                                {% else %}
-                                <span class="text-muted">-</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+        <div class="stat-value">
+            <span class="text-info">{{ stats.inbound_recordings }}</span>
+            <span class="text-muted" style="font-size: 1.25rem;"> / </span>
+            <span style="color: #a855f7;">{{ stats.outbound_recordings }}</span>
+        </div>
+        <small class="text-muted">Total conversations</small>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">
+            <i class="bi bi-clock-history text-warning"></i> Recorded Audio
+        </div>
+        <div class="stat-value warning">
+            {% if stats.total_duration_seconds >= 3600 %}
+                {{ (stats.total_duration_seconds / 3600) | round(1) }}h
+            {% elif stats.total_duration_seconds >= 60 %}
+                {{ (stats.total_duration_seconds / 60) | round(1) }}m
             {% else %}
-            <div class="empty-state">
-                <div class="empty-state-icon">
-                    <i class="bi bi-record-circle"></i>
-                </div>
-                <div class="empty-state-title">No egress jobs</div>
-                <div class="empty-state-description">
-                    Start recording or streaming your LiveKit rooms by creating an egress job
-                </div>
-            </div>
+                {{ stats.total_duration_seconds }}s
             {% endif %}
         </div>
+        <small class="text-muted">{{ stats.total_duration_seconds }} total seconds</small>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">
+            <i class="bi bi-cloud-check text-success"></i> R2 Storage Used
+        </div>
+        <div class="stat-value success">
+            {% if stats.total_file_size_bytes >= 1073741824 %}
+                {{ (stats.total_file_size_bytes / 1073741824) | round(2) }} GB
+            {% elif stats.total_file_size_bytes >= 1048576 %}
+                {{ (stats.total_file_size_bytes / 1048576) | round(2) }} MB
+            {% else %}
+                {{ (stats.total_file_size_bytes / 1024) | round(1) }} KB
+            {% endif %}
+        </div>
+        <small class="text-muted">Bucket: wasid-voice-recordings</small>
     </div>
 </div>
 
-<!-- Start Egress Modal -->
+<!-- Filter Toolbar -->
+<div class="card mb-4">
+    <div class="card-body py-3">
+        <form method="get" action="/egress" class="row g-3 align-items-center">
+            <div class="col-md-3">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" name="search" class="form-control" placeholder="Search phone, room, ID..." value="{{ search_query }}">
+                </div>
+            </div>
+
+            <div class="col-md-3">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-arrows-expand"></i></span>
+                    <select name="direction" class="form-select" onchange="this.form.submit()">
+                        <option value="all" {% if selected_direction == 'all' %}selected{% endif %}>All Directions</option>
+                        <option value="inbound" {% if selected_direction == 'inbound' %}selected{% endif %}>Inbound (↓)</option>
+                        <option value="outbound" {% if selected_direction == 'outbound' %}selected{% endif %}>Outbound (↑)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="col-md-3">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-funnel"></i></span>
+                    <select name="status" class="form-select" onchange="this.form.submit()">
+                        <option value="all" {% if selected_status == 'all' %}selected{% endif %}>All Statuses</option>
+                        <option value="completed" {% if selected_status == 'completed' %}selected{% endif %}>Completed</option>
+                        <option value="recording" {% if selected_status == 'recording' %}selected{% endif %}>Recording</option>
+                        <option value="failed" {% if selected_status == 'failed' %}selected{% endif %}>Failed</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="col-md-3 d-flex gap-2 justify-content-end">
+                <button type="submit" class="btn btn-secondary btn-sm">
+                    <i class="bi bi-filter"></i> Apply
+                </button>
+                <a href="/egress" class="btn btn-outline-secondary btn-sm" title="Clear Filters">
+                    <i class="bi bi-x-circle"></i> Reset
+                </a>
+                <button type="button" class="btn btn-primary btn-sm ms-auto" data-bs-toggle="modal" data-bs-target="#startEgressModal">
+                    <i class="bi bi-plus-circle"></i> Start Egress
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Persistent Call Recordings Table -->
+<div class="card mb-4" id="recordings-card" hx-get="/egress" hx-trigger="every 10s" hx-select="#recordings-table-body" hx-target="#recordings-table-body" hx-swap="outerHTML">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="card-title mb-0">
+            <i class="bi bi-music-note-list text-primary me-2"></i> Voice Call Recordings
+        </h5>
+        <span class="badge bg-secondary">Auto-syncing every 10s</span>
+    </div>
+    <div class="card-body p-0">
+        {% if recordings %}
+        <div class="table-container">
+            <table class="table align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Direction</th>
+                        <th>Phone / DID</th>
+                        <th>Agent / Room</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>Size</th>
+                        <th>Listen</th>
+                        <th>Started</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordings-table-body">
+                    {% for rec in recordings %}
+                    <tr>
+                        <td>
+                            {% if rec.direction == 'inbound' %}
+                            <span class="badge badge-inbound"><i class="bi bi-arrow-down-left"></i> Inbound</span>
+                            {% else %}
+                            <span class="badge badge-outbound"><i class="bi bi-arrow-up-right"></i> Outbound</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div>
+                                <strong style="color: var(--text-primary);">{{ rec.caller_number or 'Inbound Caller' }}</strong>
+                                {% if rec.callee_number %}
+                                <span class="text-muted mx-1">→</span>
+                                <small class="text-muted">{{ rec.callee_number }}</small>
+                                {% endif %}
+                            </div>
+                            {% if rec.did_number %}
+                            <small class="text-muted"><i class="bi bi-telephone"></i> {{ rec.did_number }}</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div style="font-size: 0.8125rem;">
+                                <span class="badge bg-dark text-light">{{ rec.agent_id or 'wasid-ai-automation-master' }}</span>
+                            </div>
+                            <small class="text-muted font-monospace" style="font-size: 0.75rem;">{{ rec.room_name }}</small>
+                        </td>
+                        <td>
+                            {% if rec.status == 'recording' %}
+                            <span class="badge badge-recording"><i class="bi bi-record-fill"></i> RECORDING</span>
+                            {% elif rec.status == 'completed' %}
+                            <span class="badge badge-success"><i class="bi bi-check-circle"></i> Completed</span>
+                            {% elif rec.status == 'failed' %}
+                            <span class="badge badge-danger" title="{{ rec.error_message or 'Error' }}"><i class="bi bi-exclamation-triangle"></i> Failed</span>
+                            {% else %}
+                            <span class="badge badge-warning">{{ rec.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if rec.duration_seconds > 0 %}
+                            <span style="font-weight: 500;">
+                                {{ (rec.duration_seconds // 60) }}:{{ "%02d"|format(rec.duration_seconds % 60) }}
+                            </span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if rec.file_size_bytes > 0 %}
+                            <small class="text-muted">{{ (rec.file_size_bytes / 1024) | round(0) }} KB</small>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if rec.status == 'completed' and rec.storage_object_key %}
+                            <div class="audio-player-container">
+                                <audio controls preload="none" src="/egress/{{ rec.recording_id }}/stream"></audio>
+                            </div>
+                            {% elif rec.status == 'recording' %}
+                            <small class="text-danger"><i class="bi bi-broadcast"></i> Live in progress...</small>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <small class="text-muted">{{ rec.started_at[:19].replace('T', ' ') if rec.started_at else '-' }}</small>
+                        </td>
+                        <td class="text-end">
+                            <div class="btn-group btn-group-sm">
+                                {% if rec.status == 'completed' and rec.storage_object_key %}
+                                <a href="/egress/{{ rec.recording_id }}/download" class="btn btn-outline-primary" title="Download Recording">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                                {% endif %}
+                                <form method="post" action="/egress/{{ rec.recording_id }}/delete" style="display: inline;" onsubmit="return confirm('Permanently delete this recording from Cloudflare R2?');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <button type="submit" class="btn btn-outline-danger" title="Delete Recording">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state p-5 text-center">
+            <div class="empty-state-icon mb-3">
+                <i class="bi bi-mic text-muted" style="font-size: 3rem;"></i>
+            </div>
+            <h5 class="empty-state-title">No recordings found</h5>
+            <p class="empty-state-description text-muted">
+                Every inbound call to Vobiz DID (+918065355408) and every outbound conversation is automatically recorded to Cloudflare R2 and will appear here.
+            </p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Active LiveKit Egress Worker Jobs -->
+{% if active_egress_jobs %}
+<div class="card mb-4 border-warning">
+    <div class="card-header bg-warning-subtle d-flex justify-content-between align-items-center">
+        <h6 class="card-title mb-0 text-warning-emphasis">
+            <i class="bi bi-activity me-2"></i> Active LiveKit Worker Jobs ({{ active_egress_jobs|length }})
+        </h6>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-container">
+            <table class="table mb-0">
+                <thead>
+                    <tr>
+                        <th>Egress ID</th>
+                        <th>Room Name</th>
+                        <th>Status</th>
+                        <th>Started At</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for job in active_egress_jobs %}
+                    <tr>
+                        <td><code>{{ job.egress_id[:16] }}...</code></td>
+                        <td><strong>{{ job.room_name or '-' }}</strong></td>
+                        <td><span class="badge badge-recording">{{ job.status }}</span></td>
+                        <td><small>{{ job.started_at }}</small></td>
+                        <td>
+                            <form method="post" action="/egress/{{ job.egress_id }}/stop" style="display: inline;" onsubmit="return confirm('Stop this active egress worker?');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                    <i class="bi bi-stop-circle"></i> Stop
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Start Manual Egress Modal -->
 <div class="modal fade" id="startEgressModal" tabindex="-1" aria-labelledby="startEgressModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="startEgressModalLabel">Start Egress</h5>
+                <h5 class="modal-title" id="startEgressModalLabel">Manual Egress Recording</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <div class="modal-body">
-                <!-- Type selector -->
-                <div class="form-group">
-                    <label class="form-label">Egress Type</label>
-                    <select class="form-select" id="egressTypeSelect">
-                        <option value="composite" selected>Room Composite (full room recording)</option>
-                        <option value="track">Track (single track export)</option>
-                        <option value="web">Web (capture a URL)</option>
-                    </select>
-                </div>
-                <hr>
-
-                <!-- Room Composite form -->
-                <form method="post" action="/egress/start" id="compositeEgressForm">
+            <form method="post" action="/egress/start">
+                <div class="modal-body">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <div class="form-group">
+                    <div class="form-group mb-3">
                         <label class="form-label">Room Name *</label>
-                        <input type="text" class="form-control" name="room_name" placeholder="my-room" required>
+                        <input type="text" class="form-control" name="room_name" placeholder="e.g. sip-in-..." required>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group mb-3">
                         <label class="form-label">Output Filename *</label>
-                        <input type="text" class="form-control" name="output_filename" placeholder="recording-{room}-{time}.mp4" required>
-                        <small class="text-muted">Supports: {room}, {time}</small>
+                        <input type="text" class="form-control" name="output_filename" placeholder="manual-{room}-{time}.m4a" required>
+                        <small class="text-muted">Saved directly into Cloudflare R2 bucket wasid-voice-recordings</small>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group mb-3">
                         <label class="form-label">Layout</label>
                         <select class="form-select" name="layout">
                             <option value="grid" selected>Grid</option>
                             <option value="speaker">Speaker</option>
-                            <option value="single-speaker">Single Speaker</option>
                         </select>
                     </div>
-                    <div class="form-group mb-0">
-                        <div class="form-check mb-2">
-                            <input class="form-check-input" type="checkbox" name="audio_only" id="audio_only">
-                            <label class="form-check-label" for="audio_only">Audio Only</label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" name="video_only" id="video_only">
-                            <label class="form-check-label" for="video_only">Video Only</label>
-                        </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" name="audio_only" id="audio_only" checked>
+                        <label class="form-check-label" for="audio_only">Audio Only (Optimized for Telephone Calls)</label>
                     </div>
-                    <div class="modal-footer px-0 pb-0 mt-3">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-primary"><i class="bi bi-record-circle"></i> Start</button>
-                    </div>
-                </form>
-
-                <!-- Track Egress form -->
-                <form method="post" action="/egress/start/track" id="trackEgressForm" style="display:none;">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <div class="form-group">
-                        <label class="form-label">Room Name *</label>
-                        <input type="text" class="form-control" name="room_name" placeholder="my-room" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Track SID *</label>
-                        <input type="text" class="form-control" name="track_sid" placeholder="TR_…" required>
-                        <small class="text-muted">Find the track SID on the room detail page</small>
-                    </div>
-                    <div class="form-group mb-0">
-                        <label class="form-label">Output Filename *</label>
-                        <input type="text" class="form-control" name="output_filename" placeholder="track-{time}.mp4" required>
-                        <small class="text-muted">Supports: {time}</small>
-                    </div>
-                    <div class="modal-footer px-0 pb-0 mt-3">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-primary"><i class="bi bi-record-circle"></i> Start</button>
-                    </div>
-                </form>
-
-                <!-- Web Egress form -->
-                <form method="post" action="/egress/start/web" id="webEgressForm" style="display:none;">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <div class="form-group">
-                        <label class="form-label">URL to capture *</label>
-                        <input type="url" class="form-control" name="url" placeholder="https://example.com/room" required>
-                        <small class="text-muted">LiveKit will open this URL in a headless browser and record it</small>
-                    </div>
-                    <div class="form-group mb-0">
-                        <label class="form-label">Output Filename *</label>
-                        <input type="text" class="form-control" name="output_filename" placeholder="web-{time}.mp4" required>
-                        <small class="text-muted">Supports: {time}</small>
-                    </div>
-                    <div class="modal-footer px-0 pb-0 mt-3">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-primary"><i class="bi bi-record-circle"></i> Start</button>
-                    </div>
-                </form>
-            </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-record-circle"></i> Start Recording</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
 {% endblock %}
-
-{% block extra_scripts %}
-<style>
-/* Modal styling */
-#startEgressModal .modal-dialog {
-    max-width: 500px;
-}
-
-#startEgressModal .modal-content {
-    background-color: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: 0.75rem;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
-}
-
-#startEgressModal .modal-header {
-    border-bottom: 1px solid var(--border-color);
-    padding: 1.25rem 1.5rem;
-}
-
-#startEgressModal .modal-title {
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-#startEgressModal .modal-body {
-    padding: 1.5rem;
-}
-
-#startEgressModal .modal-footer {
-    border-top: 1px solid var(--border-color);
-    padding: 1rem 1.5rem;
-    background-color: transparent;
-}
-
-#startEgressModal .form-group {
-    margin-bottom: 1.25rem;
-}
-
-#startEgressModal .form-label {
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: var(--text-primary);
-    margin-bottom: 0.5rem;
-}
-
-#startEgressModal small {
-    font-size: 0.8125rem;
-    color: var(--text-muted);
-    display: block;
-    margin-top: 0.25rem;
-}
-</style>
-
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-    const forms = {
-        composite: document.getElementById('compositeEgressForm'),
-        track: document.getElementById('trackEgressForm'),
-        web: document.getElementById('webEgressForm'),
-    };
-    const sel = document.getElementById('egressTypeSelect');
-
-    function showForm(type) {
-        Object.entries(forms).forEach(([k, f]) => {
-            f.style.display = k === type ? '' : 'none';
-        });
-    }
-
-    sel.addEventListener('change', () => showForm(sel.value));
-
-    const modal = document.getElementById('startEgressModal');
-    if (modal) {
-        modal.addEventListener('hidden.bs.modal', () => {
-            Object.values(forms).forEach(f => f.reset());
-            sel.value = 'composite';
-            showForm('composite');
-        });
-    }
-});
-</script>
-{% endblock %}
-

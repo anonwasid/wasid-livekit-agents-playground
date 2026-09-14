@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.routes import overview, rooms, egress, ingress, sip, settings, sandbox, auth, agents, homer, search, views, alerts, audit, diagnostics, events
+from app.routes import overview, rooms, egress, ingress, sip, settings, sandbox, auth, agents, homer, search, views, alerts, audit, diagnostics, events, webhooks
 from app.security.basic_auth import get_current_user
 from app.security.csrf import get_csrf_token
 from app.utils.formatters import format_duration, format_pct, status_color, format_number
@@ -50,9 +50,22 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️ Failed to initialize Telephony Database: {e}")
 
+    # Start Recording Supervisor
+    try:
+        from app.services.recording_supervisor import start_recording_supervisor, stop_recording_supervisor
+        start_recording_supervisor()
+        print("✅ LiveKit Call Recording Supervisor started")
+    except Exception as e:
+        print(f"⚠️ Failed to start Recording Supervisor: {e}")
+
     yield
 
     # Shutdown
+    try:
+        from app.services.recording_supervisor import stop_recording_supervisor
+        stop_recording_supervisor()
+    except Exception:
+        pass
     print("👋 LiveKit Dashboard shutting down...")
 
 
@@ -85,6 +98,7 @@ async def auth_guard_middleware(request: Request, call_next):
     if (
         path in ("/login", "/logout", "/health", "/favicon.ico")
         or path.startswith("/static/")
+        or path.startswith("/api/webhooks/")
     ):
         return await call_next(request)
 
@@ -217,6 +231,7 @@ app.include_router(alerts.router, tags=["Alerts"])
 app.include_router(audit.router, tags=["Audit"])
 app.include_router(diagnostics.router, tags=["Diagnostics"])
 app.include_router(events.router, tags=["Events"])
+app.include_router(webhooks.router, tags=["Webhooks"])
 
 
 # Security headers middleware

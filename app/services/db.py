@@ -21,6 +21,9 @@ from sqlalchemy import (
     String,
     Text,
     select,
+    func,
+    desc,
+    or_,
 )
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -108,6 +111,61 @@ class CallRecord(Base):
             "metadata_json": self.metadata_json,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "ended_at": self.ended_at.isoformat() if self.ended_at else None,
+        }
+
+
+class CallRecordingRecord(Base):
+    """Authoritative Call Recording table in PostgreSQL."""
+
+    __tablename__ = "call_recordings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    recording_id = Column(String(64), unique=True, index=True, nullable=False)
+    call_id = Column(String(64), index=True, nullable=True)
+    room_name = Column(String(128), index=True, nullable=False)
+    egress_id = Column(String(64), index=True, nullable=True)
+    direction = Column(String(16), nullable=False, default="inbound")  # inbound / outbound
+    caller_number = Column(String(32), nullable=False, default="")
+    callee_number = Column(String(32), nullable=False, default="")
+    did_number = Column(String(32), nullable=False, default="")
+    tenant_id = Column(String(64), nullable=False, index=True, default="wasid-hq")
+    agent_id = Column(String(64), nullable=False, default="wasid-ai-automation-master")
+    status = Column(String(32), nullable=False, default="recording")  # recording, completed, failed, deleted
+    duration_seconds = Column(Integer, nullable=False, default=0)
+    file_size_bytes = Column(Integer, nullable=False, default=0)
+    storage_provider = Column(String(32), nullable=False, default="cloudflare_r2")
+    storage_bucket = Column(String(128), nullable=False, default="wasid-voice-recordings")
+    storage_object_key = Column(String(256), nullable=True)
+    media_url = Column(String(512), nullable=True)
+    started_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    error_message = Column(Text, nullable=True)
+    metadata_json = Column(Text, nullable=False, default="{}")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "recording_id": self.recording_id,
+            "call_id": self.call_id,
+            "room_name": self.room_name,
+            "egress_id": self.egress_id,
+            "direction": self.direction,
+            "caller_number": self.caller_number,
+            "callee_number": self.callee_number,
+            "did_number": self.did_number,
+            "tenant_id": self.tenant_id,
+            "agent_id": self.agent_id,
+            "status": self.status,
+            "duration_seconds": self.duration_seconds,
+            "file_size_bytes": self.file_size_bytes,
+            "storage_provider": self.storage_provider,
+            "storage_bucket": self.storage_bucket,
+            "storage_object_key": self.storage_object_key,
+            "media_url": self.media_url,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "ended_at": self.ended_at.isoformat() if self.ended_at else None,
+            "error_message": self.error_message,
+            "metadata_json": self.metadata_json,
         }
 
 
@@ -346,6 +404,221 @@ class TelephonyDatabase:
             result = await session.execute(stmt)
             return [row.to_dict() for row in result.scalars()]
 
+    # Recording Management
+    async def create_recording(
+        self,
+        recording_id: str,
+        room_name: str,
+        direction: str = "inbound",
+        call_id: Optional[str] = None,
+        egress_id: Optional[str] = None,
+        caller_number: str = "",
+        callee_number: str = "",
+        did_number: str = "",
+        tenant_id: str = "wasid-hq",
+        agent_id: str = "wasid-ai-automation-master",
+        status: str = "recording",
+        storage_bucket: str = "wasid-voice-recordings",
+        storage_object_key: Optional[str] = None,
+        duration_seconds: int = 0,
+        file_size_bytes: int = 0,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Create a new call recording record in PostgreSQL."""
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            async with session.begin():
+                record = CallRecordingRecord(
+                    recording_id=recording_id,
+                    call_id=call_id,
+                    room_name=room_name,
+                    egress_id=egress_id,
+                    direction=direction,
+                    caller_number=caller_number,
+                    callee_number=callee_number,
+                    did_number=did_number,
+                    tenant_id=tenant_id,
+                    agent_id=agent_id,
+                    status=status,
+                    duration_seconds=duration_seconds,
+                    file_size_bytes=file_size_bytes,
+                    storage_provider="cloudflare_r2",
+                    storage_bucket=storage_bucket,
+                    storage_object_key=storage_object_key,
+                    started_at=datetime.now(timezone.utc),
+                    metadata_json=json.dumps(metadata or {}),
+                )
+                session.add(record)
+                await session.flush()
+                return record.to_dict()
+
+    async def update_recording(
+        self,
+        recording_id: str,
+        egress_id: Optional[str] = None,
+        status: Optional[str] = None,
+        duration_seconds: Optional[int] = None,
+        file_size_bytes: Optional[int] = None,
+        storage_object_key: Optional[str] = None,
+        media_url: Optional[str] = None,
+        ended_at: Optional[datetime] = None,
+        error_message: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Update an existing call recording record."""
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            async with session.begin():
+                stmt = select(CallRecordingRecord).where(CallRecordingRecord.recording_id == recording_id)
+                result = await session.execute(stmt)
+                record = result.scalars().first()
+                if not record:
+                    return None
+
+                if egress_id is not None:
+                    record.egress_id = egress_id
+                if status is not None:
+                    record.status = status
+                if duration_seconds is not None:
+                    record.duration_seconds = duration_seconds
+                if file_size_bytes is not None:
+                    record.file_size_bytes = file_size_bytes
+                if storage_object_key is not None:
+                    record.storage_object_key = storage_object_key
+                if media_url is not None:
+                    record.media_url = media_url
+                if ended_at is not None:
+                    record.ended_at = ended_at
+                elif status in ("completed", "failed", "deleted") and not record.ended_at:
+                    record.ended_at = datetime.now(timezone.utc)
+                if error_message is not None:
+                    record.error_message = error_message
+                if metadata is not None:
+                    record.metadata_json = json.dumps(metadata)
+
+                await session.flush()
+                return record.to_dict()
+
+    async def get_recording(self, recording_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a specific recording by its canonical recording_id."""
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            stmt = select(CallRecordingRecord).where(CallRecordingRecord.recording_id == recording_id)
+            result = await session.execute(stmt)
+            record = result.scalars().first()
+            return record.to_dict() if record else None
+
+    async def get_recording_by_egress_id(self, egress_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a recording by its LiveKit egress ID."""
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            stmt = select(CallRecordingRecord).where(CallRecordingRecord.egress_id == egress_id)
+            result = await session.execute(stmt)
+            record = result.scalars().first()
+            return record.to_dict() if record else None
+
+    async def get_recording_by_room(self, room_name: str) -> Optional[Dict[str, Any]]:
+        """Fetch the latest recording for a given room name."""
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            stmt = (
+                select(CallRecordingRecord)
+                .where(CallRecordingRecord.room_name == room_name)
+                .order_by(CallRecordingRecord.started_at.desc())
+            )
+            result = await session.execute(stmt)
+            record = result.scalars().first()
+            return record.to_dict() if record else None
+
+    async def list_recordings(
+        self,
+        direction: Optional[str] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """List recordings with optional filtering and pagination."""
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            stmt = select(CallRecordingRecord).where(CallRecordingRecord.status != "deleted")
+            if direction and direction.lower() != "all":
+                stmt = stmt.where(CallRecordingRecord.direction == direction.lower())
+            if status and status.lower() != "all":
+                stmt = stmt.where(CallRecordingRecord.status == status.lower())
+            if search:
+                pattern = f"%{search.strip()}%"
+                stmt = stmt.where(
+                    or_(
+                        CallRecordingRecord.caller_number.ilike(pattern),
+                        CallRecordingRecord.callee_number.ilike(pattern),
+                        CallRecordingRecord.did_number.ilike(pattern),
+                        CallRecordingRecord.room_name.ilike(pattern),
+                        CallRecordingRecord.recording_id.ilike(pattern),
+                        CallRecordingRecord.egress_id.ilike(pattern),
+                    )
+                )
+            stmt = stmt.order_by(CallRecordingRecord.started_at.desc()).limit(limit).offset(offset)
+            result = await session.execute(stmt)
+            return [row.to_dict() for row in result.scalars()]
+
+    async def delete_recording(self, recording_id: str, hard: bool = False) -> bool:
+        """Mark a recording as deleted or permanently remove it."""
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            async with session.begin():
+                stmt = select(CallRecordingRecord).where(CallRecordingRecord.recording_id == recording_id)
+                result = await session.execute(stmt)
+                record = result.scalars().first()
+                if not record:
+                    return False
+                if hard:
+                    await session.delete(record)
+                else:
+                    record.status = "deleted"
+                await session.flush()
+                return True
+
+    async def get_recording_stats(self) -> Dict[str, Any]:
+        """Compute aggregated statistics for the recordings dashboard."""
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            stmt_total = select(func.count(CallRecordingRecord.id)).where(CallRecordingRecord.status != "deleted")
+            stmt_inbound = select(func.count(CallRecordingRecord.id)).where(
+                CallRecordingRecord.status != "deleted", CallRecordingRecord.direction == "inbound"
+            )
+            stmt_outbound = select(func.count(CallRecordingRecord.id)).where(
+                CallRecordingRecord.status != "deleted", CallRecordingRecord.direction == "outbound"
+            )
+            stmt_active = select(func.count(CallRecordingRecord.id)).where(CallRecordingRecord.status == "recording")
+            stmt_duration = select(func.sum(CallRecordingRecord.duration_seconds)).where(CallRecordingRecord.status != "deleted")
+            stmt_bytes = select(func.sum(CallRecordingRecord.file_size_bytes)).where(CallRecordingRecord.status != "deleted")
+
+            total = (await session.execute(stmt_total)).scalar() or 0
+            inbound = (await session.execute(stmt_inbound)).scalar() or 0
+            outbound = (await session.execute(stmt_outbound)).scalar() or 0
+            active = (await session.execute(stmt_active)).scalar() or 0
+            total_duration = (await session.execute(stmt_duration)).scalar() or 0
+            total_bytes = (await session.execute(stmt_bytes)).scalar() or 0
+
+            return {
+                "total_recordings": total,
+                "inbound_recordings": inbound,
+                "outbound_recordings": outbound,
+                "active_recordings": active,
+                "total_duration_seconds": total_duration,
+                "total_file_size_bytes": total_bytes,
+            }
+
 
 # Singleton instance
 telephony_db = TelephonyDatabase()
+

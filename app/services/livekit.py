@@ -248,13 +248,36 @@ class LiveKitClient:
         layout: str = "grid",
         audio_only: bool = False,
         video_only: bool = False,
+        s3_bucket: Optional[str] = None,
+        s3_endpoint: Optional[str] = None,
+        s3_access_key: Optional[str] = None,
+        s3_secret: Optional[str] = None,
+        s3_region: Optional[str] = None,
     ):
-        """Start a room composite egress"""
+        """Start a room composite egress with direct Cloudflare R2 / S3 upload."""
         lk = await self._get_api()
+
+        s3_bucket = s3_bucket or os.getenv("R2_BUCKET", "wasid-voice-recordings")
+        s3_access_key = s3_access_key or os.getenv("R2_ACCESS_KEY_ID", "")
+        s3_secret = s3_secret or os.getenv("R2_SECRET_ACCESS_KEY", "")
+        s3_endpoint = s3_endpoint or os.getenv("R2_ENDPOINT", "")
+        s3_region = s3_region or os.getenv("R2_REGION", "auto")
+
+        s3_upload = None
+        if s3_bucket and s3_access_key and s3_secret and s3_endpoint:
+            s3_upload = api.S3Upload(
+                bucket=s3_bucket,
+                access_key=s3_access_key,
+                secret=s3_secret,
+                endpoint=s3_endpoint,
+                region=s3_region,
+                force_path_style=True,
+            )
 
         file_output = api.EncodedFileOutput(
             file_type=api.EncodedFileType.MP4,
             filepath=output_filename,
+            s3=s3_upload,
         )
 
         composite_request = api.RoomCompositeEgressRequest(
@@ -266,6 +289,7 @@ class LiveKitClient:
         )
 
         return await lk.egress.start_room_composite_egress(composite_request)
+
 
     async def stop_egress(self, egress_id: str):
         """Stop an egress job"""
