@@ -778,3 +778,33 @@ async def provision_vobiz_inbound(
     except Exception as e:
         err = quote(f"Failed to provision Vobiz rule: {str(e)}")
         return RedirectResponse(url=f"/sip-inbound?flash_message={err}&flash_type=danger", status_code=303)
+
+
+@router.post("/sip-inbound/did/assign", dependencies=[Depends(requires_admin)])
+async def assign_did_routing(
+    request: Request,
+    csrf_token: str = Form(...),
+    did: str = Form(...),
+    agent_name: str = Form(...),
+    tenant_id: Optional[str] = Form(None),
+    lk: LiveKitClient = Depends(get_livekit_client),
+):
+    """Assign an inbound DID to a canonical agent in PostgreSQL and sync to LiveKit dispatch rule."""
+    await verify_csrf_token(request)
+    if not lk.sip_enabled:
+        return RedirectResponse(url="/", status_code=303)
+
+    try:
+        from app.services.sip_routing import sip_routing_service
+        updated = await sip_routing_service.reassign_did_routing(
+            lk=lk,
+            did=did.strip(),
+            agent_name=agent_name.strip(),
+            tenant_id=tenant_id.strip() if tenant_id else None,
+        )
+        msg = quote(f"DID {did} successfully mapped to '{agent_name}' in PostgreSQL & LiveKit.")
+        return RedirectResponse(url=f"/sip-inbound?flash_message={msg}&flash_type=success", status_code=303)
+    except Exception as e:
+        logger.warning("Error assigning DID: %s", e)
+        err = quote(f"Failed to assign DID: {str(e)}")
+        return RedirectResponse(url=f"/sip-inbound?flash_message={err}&flash_type=danger", status_code=303)

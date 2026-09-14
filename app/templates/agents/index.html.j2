@@ -755,6 +755,62 @@
                 </tbody>
             </table>
         </div>
+
+        <!-- Authoritative DIDs from PostgreSQL Global Source of Truth -->
+        {% if routing_matrix and routing_matrix.did_routings %}
+        <div class="mt-4 pt-3 border-top border-secondary border-opacity-25">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="text-white mb-0 d-flex align-items-center gap-2">
+                    <i class="bi bi-database-check text-info"></i>
+                    <span>Authoritative Telephony DIDs (PostgreSQL Source of Truth)</span>
+                    <span class="badge bg-primary bg-opacity-20 text-primary border border-primary border-opacity-25">{{ routing_matrix.authoritative_did_count }} DIDs</span>
+                </h6>
+                <a href="/sip-inbound" class="btn btn-sm btn-outline-info" style="font-size: 0.75rem;">
+                    <i class="bi bi-gear"></i> Manage DIDs in SIP Telephony
+                </a>
+            </div>
+            <div class="table-responsive">
+                <table class="wl-table" style="font-size: 0.8125rem;">
+                    <thead>
+                        <tr>
+                            <th>DID Number</th>
+                            <th>Tenant Name</th>
+                            <th>Tenant ID</th>
+                            <th>Assigned Canonical Agent</th>
+                            <th>Sync Health</th>
+                            <th>Room Prefix</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for d in routing_matrix.did_routings %}
+                        <tr>
+                            <td class="mono-cell fw-bold text-info">{{ d.did }}</td>
+                            <td class="text-white">{{ d.tenant_name }}</td>
+                            <td><code class="text-secondary" style="font-size: 0.75rem;">{{ d.tenant_id }}</code></td>
+                            <td>
+                                <span class="badge {% if d.agent_id == 'wasid-ai-automation-master' %}bg-primary{% else %}bg-purple{% endif %} bg-opacity-20 text-light border border-secondary border-opacity-25 px-2 py-1">
+                                    {{ d.agent_id }}
+                                </span>
+                            </td>
+                            <td>
+                                {% if d.sync_status == 'IN-SYNC' %}
+                                <span class="badge bg-success bg-opacity-20 text-success border border-success border-opacity-25">
+                                    <i class="bi bi-check-circle me-1"></i> IN-SYNC
+                                </span>
+                                {% else %}
+                                <span class="badge bg-warning bg-opacity-20 text-warning border border-warning border-opacity-25">
+                                    <i class="bi bi-exclamation-triangle me-1"></i> DRIFT
+                                </span>
+                                {% endif %}
+                            </td>
+                            <td class="mono-cell text-success">{{ d.room_prefix }}*</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <!-- 4. Live Telephony Sessions & Dispatches Section -->

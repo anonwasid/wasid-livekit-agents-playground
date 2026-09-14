@@ -11,7 +11,11 @@ from typing import List, Optional, Tuple, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-from livekit import api, rtc
+try:
+    from livekit import api, rtc
+except ImportError:
+    from livekit import api
+    rtc = None
 
 from app.services import cache as dispatch_cache
 

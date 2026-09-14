@@ -11,12 +11,15 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from app.services.db import telephony_db
+
 logger = logging.getLogger(__name__)
 
 # Canonical Master Agents
 CANONICAL_MASTER_AGENT = "wasid-ai-automation-master"
 CANONICAL_CUSTOMER_AGENT = "wasid-customer-master"
-DEFAULT_TENANT_ID = "WAS12345678"
+CANONICAL_AGENTS = [CANONICAL_MASTER_AGENT, CANONICAL_CUSTOMER_AGENT]
+DEFAULT_TENANT_ID = "wasid-hq"
 DEFAULT_INBOUND_ROOM_PREFIX = "sip-in-"
 DEFAULT_OUTBOUND_ROOM_PREFIX = "sip-out-"
 
@@ -165,20 +168,89 @@ class SipRoutingService:
                 "metadata": json.dumps({"tenant_id": DEFAULT_TENANT_ID, "agent_id": CANONICAL_MASTER_AGENT}),
             })
 
+        # 3. PostgreSQL Authoritative DID Routings & LiveKit Reconciliation
+        db_did_records = []
+        try:
+            db_did_records = await telephony_db.get_all_did_routings()
+        except Exception as e:
+            logger.warning("Failed to fetch DID routings from database: %s", e)
+
+        # Index live dispatch rules by rule ID and bound agent
+        live_rule_ids = {getattr(r, "sip_dispatch_rule_id", ""): r for r in dispatch_rules}
+        live_agent_rules = {}
+        for r in dispatch_rules:
+            rc = getattr(r, "room_config", None)
+            if rc and hasattr(rc, "agents"):
+                for ag in rc.agents:
+                    if getattr(ag, "agent_name", ""):
+                        live_agent_rules[ag.agent_name] = r
+
+        authoritative_dids = []
+        for dr in db_did_records:
+            did_num = dr["did"]
+            agent_id = dr["agent_id"]
+            rule_id = dr.get("dispatch_rule_id")
+            
+            # Check LiveKit sync status
+            is_synced = False
+            matched_rule = None
+            if rule_id and rule_id in live_rule_ids:
+                matched_rule = live_rule_ids[rule_id]
+                # Verify agent binding inside matched rule
+                rc = getattr(matched_rule, "room_config", None)
+                if rc and hasattr(rc, "agents"):
+                    for ag in rc.agents:
+                        if getattr(ag, "agent_name", "") == agent_id:
+                            is_synced = True
+                            break
+            elif agent_id in live_agent_rules:
+                matched_rule = live_agent_rules[agent_id]
+                is_synced = True
+
+            authoritative_dids.append({
+                "did": did_num,
+                "tenant_id": dr["tenant_id"],
+                "tenant_name": dr["tenant_name"],
+                "agent_id": agent_id,
+                "provider": dr["provider"],
+                "inbound_trunk_id": dr.get("inbound_trunk_id") or "vobiz-primary",
+                "dispatch_rule_id": getattr(matched_rule, "sip_dispatch_rule_id", rule_id or "SDR_qgCxptTPBnyh"),
+                "room_prefix": dr.get("room_prefix", DEFAULT_INBOUND_ROOM_PREFIX),
+                "room_strategy": f"{dr.get('room_prefix', DEFAULT_INBOUND_ROOM_PREFIX)}{{caller}}_{{suffix}}",
+                "sync_status": "IN-SYNC" if is_synced else "DRIFT",
+                "is_active": dr.get("is_active", True),
+                "source_of_truth": "PostgreSQL",
+            })
+
         # Summary statistics
         inbound_count = sum(1 for r in routes if r["direction"] == "INBOUND")
         outbound_count = sum(1 for r in routes if r["direction"] == "OUTBOUND")
-        vobiz_ready = inbound_count > 0 and any(
-            r["is_unique_room"] and r["target_agent"] == CANONICAL_MASTER_AGENT for r in routes
-        )
+        in_sync_dids = sum(1 for d in authoritative_dids if d["sync_status"] == "IN-SYNC")
+        drift_dids = sum(1 for d in authoritative_dids if d["sync_status"] == "DRIFT")
+        vobiz_ready = (inbound_count > 0 and any(
+            r["is_unique_room"] and r["target_agent"] in CANONICAL_AGENTS for r in routes
+        )) or in_sync_dids > 0
+
+        # Recent calls from PostgreSQL
+        recent_calls = []
+        try:
+            recent_calls = await telephony_db.list_recent_calls(limit=25)
+        except Exception as e:
+            logger.debug("Failed to list recent calls: %s", e)
 
         return {
             "routes": routes,
+            "did_routings": authoritative_dids,
+            "recent_calls": recent_calls,
             "inbound_trunks_count": len(inbound_trunks),
             "outbound_trunks_count": len(outbound_trunks),
             "dispatch_rules_count": len(dispatch_rules),
+            "authoritative_did_count": len(authoritative_dids),
+            "in_sync_did_count": in_sync_dids,
+            "drift_did_count": drift_dids,
             "active_sip_calls": len(active_sip_rooms),
             "canonical_target_agent": CANONICAL_MASTER_AGENT,
+            "canonical_agents": CANONICAL_AGENTS,
             "vobiz_ready": vobiz_ready,
             "worker_status": "ONLINE (Voice Pool Ready)",
             "voice_pipelines": ["REALTIME (Gemini Live)", "CASCADE (Groq + LiteLLM + Gemini TTS)"],
@@ -186,9 +258,45 @@ class SipRoutingService:
                 "inbound_count": inbound_count,
                 "outbound_count": outbound_count,
                 "total_routes": len(routes),
+                "total_authoritative_dids": len(authoritative_dids),
+                "in_sync_dids": in_sync_dids,
+                "drift_dids": drift_dids,
                 "unique_room_guarantee": True,
             }
         }
+
+    async def reassign_did_routing(
+        self,
+        lk,
+        did: str,
+        agent_name: str,
+        tenant_id: Optional[str] = None,
+        tenant_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Reassigns a DID to a canonical agent, updating PostgreSQL and synchronizing LiveKit dispatch."""
+        if agent_name not in CANONICAL_AGENTS:
+            raise ValueError(f"Invalid agent '{agent_name}'. Must be one of {CANONICAL_AGENTS}")
+
+        # Provision/update LiveKit dispatch rule for this agent
+        rule_res = await self.provision_vobiz_canonical_rule(
+            lk=lk,
+            agent_name=agent_name,
+            room_prefix=DEFAULT_INBOUND_ROOM_PREFIX,
+        )
+        rule_id = rule_res.get("rule_id", "SDR_qgCxptTPBnyh")
+
+        # Upsert in PostgreSQL
+        updated = await telephony_db.upsert_did_routing(
+            did=did,
+            agent_id=agent_name,
+            tenant_id=tenant_id,
+            tenant_name=tenant_name,
+            dispatch_rule_id=rule_id,
+            room_prefix=DEFAULT_INBOUND_ROOM_PREFIX,
+            is_active=True,
+        )
+        logger.info("Successfully reassigned DID %s -> %s (rule: %s) in PostgreSQL & LiveKit", did, agent_name, rule_id)
+        return updated
 
     async def provision_vobiz_canonical_rule(
         self,
@@ -198,7 +306,7 @@ class SipRoutingService:
         room_prefix: str = DEFAULT_INBOUND_ROOM_PREFIX,
     ) -> Dict[str, Any]:
         """Provisions the canonical individual dispatch rule binding inbound SIP calls to the canonical agent with unique rooms."""
-        name = "WASID Vobiz Inbound Master"
+        name = f"WASID Vobiz Inbound ({agent_name})"
         metadata = json.dumps({
             "tenant_id": DEFAULT_TENANT_ID,
             "agent_id": agent_name,
@@ -238,13 +346,34 @@ class SipRoutingService:
         if not lk.sip_enabled:
             raise ValueError("LiveKit SIP service is not enabled")
 
+        if agent_name not in CANONICAL_AGENTS:
+            logger.warning("Target agent '%s' not in canonical agents, defaulting to '%s'", agent_name, CANONICAL_MASTER_AGENT)
+            agent_name = CANONICAL_MASTER_AGENT
+
         # 1. Generate collision-safe unique room name
         timestamp = int(time.time())
         short_id = uuid.uuid4().hex[:6]
         room_name = f"{DEFAULT_OUTBOUND_ROOM_PREFIX}{timestamp}-{short_id}"
+        call_id = f"call_{timestamp}_{short_id}"
 
-        # 2. Prepare metadata
+        # 2. Record start in PostgreSQL global source of truth
+        try:
+            await telephony_db.record_call_start(
+                call_id=call_id,
+                room_name=room_name,
+                direction="outbound",
+                caller_did="Carrier Assigned",
+                callee_did=sip_call_to,
+                agent_id=agent_name,
+                tenant_id=tenant_id,
+                metadata={"sip_trunk_id": sip_trunk_id, "room_name": room_name},
+            )
+        except Exception as e:
+            logger.warning("Failed to record outbound call start in PostgreSQL: %s", e)
+
+        # 3. Prepare metadata
         call_meta = json.dumps({
+            "call_id": call_id,
             "tenant_id": tenant_id,
             "agent_id": agent_name,
             "direction": "outbound",
@@ -252,18 +381,18 @@ class SipRoutingService:
             "created_at": timestamp,
         })
 
-        # 3. Dispatch canonical agent to the unique room
+        # 4. Dispatch canonical agent to the unique room
         try:
             await lk.create_dispatch(
                 agent_name=agent_name,
                 room=room_name,
                 metadata=call_meta,
             )
-            logger.info("Dispatched agent '%s' to unique outbound room '%s'", agent_name, room_name)
+            logger.info("Dispatched canonical agent '%s' to unique outbound room '%s'", agent_name, room_name)
         except Exception as e:
             logger.warning("Error pre-dispatching agent to outbound room: %s", e)
 
-        # 4. Create the SIP participant
+        # 5. Create the SIP participant
         identity = participant_identity or f"sip-{sip_call_to.replace('+', '')}"
         participant_res = await lk.create_sip_participant(
             sip_trunk_id=sip_trunk_id,
@@ -274,6 +403,7 @@ class SipRoutingService:
 
         return {
             "status": "initiated",
+            "call_id": call_id,
             "room_name": room_name,
             "sip_trunk_id": sip_trunk_id,
             "sip_call_to": sip_call_to,
@@ -281,6 +411,14 @@ class SipRoutingService:
             "agent_name": agent_name,
             "sip_participant": str(participant_res),
         }
+
+    async def get_recent_calls(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Fetch recent call logs from PostgreSQL."""
+        try:
+            return await telephony_db.list_recent_calls(limit=limit)
+        except Exception as e:
+            logger.warning("Failed to list recent calls: %s", e)
+            return []
 
     async def get_live_telephony_sessions(self, lk) -> List[Dict[str, Any]]:
         """Fetch active telephony calls and room dispatches for the live control console."""

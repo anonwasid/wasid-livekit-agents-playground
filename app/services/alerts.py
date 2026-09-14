@@ -7,7 +7,8 @@ from dataclasses import dataclass, asdict
 from typing import Optional
 
 
-_STORE_PATH = os.environ.get("ALERT_RULES_FILE", "/tmp/alert_rules.json")
+import tempfile
+_STORE_PATH = os.environ.get("ALERT_RULES_FILE", os.path.join(tempfile.gettempdir(), "alert_rules.json"))
 
 METRICS: dict[str, str] = {
     "rooms_total": "Total Rooms",

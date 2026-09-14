@@ -86,3 +86,81 @@ async def test_initiate_outbound_call_unique_room():
     assert res["agent_name"] == "wasid-ai-automation-master"
     assert lk.create_dispatch.call_count == 1
     assert lk.create_sip_participant.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_did_routing_postgresql_sync_and_reassign():
+    import uuid
+    from app.services.db import telephony_db
+    await telephony_db.init_db()
+
+    # Ensure +971501234567 is initially mapped to wasid-ai-automation-master
+    await telephony_db.upsert_did_routing(
+        did="+971501234567",
+        agent_id="wasid-ai-automation-master",
+        tenant_id="wasid-hq",
+        tenant_name="WASID HQ / Operations",
+    )
+
+    # Verify seed DIDs are loaded
+    dids = await telephony_db.get_all_did_routings()
+    assert len(dids) >= 8
+    hq_did = await telephony_db.get_did_routing("+971501234567")
+    assert hq_did is not None
+    assert hq_did["agent_id"] == "wasid-ai-automation-master"
+
+    # Reassign DID to wasid-customer-master
+    service = SipRoutingService()
+    lk = MagicMock()
+    rule_mock = MagicMock(sip_dispatch_rule_id="SDR_test_999")
+    lk.create_sip_dispatch_rule = AsyncMock(return_value=rule_mock)
+
+    updated = await service.reassign_did_routing(
+        lk=lk,
+        did="+971501234567",
+        agent_name="wasid-customer-master",
+    )
+    assert updated["agent_id"] == "wasid-customer-master"
+    assert updated["dispatch_rule_id"] == "SDR_test_999"
+
+    # Reset back to wasid-ai-automation-master
+    await service.reassign_did_routing(
+        lk=lk,
+        did="+971501234567",
+        agent_name="wasid-ai-automation-master",
+    )
+
+    # Verify invalid agent rejection
+    with pytest.raises(ValueError):
+        await service.reassign_did_routing(
+            lk=lk,
+            did="+971501234567",
+            agent_name="invalid-fake-agent",
+        )
+
+
+@pytest.mark.asyncio
+async def test_call_lifecycle_recording():
+    import uuid
+    from app.services.db import telephony_db
+    call_id = f"call-test-{uuid.uuid4().hex[:8]}"
+    call = await telephony_db.record_call_start(
+        call_id=call_id,
+        room_name=f"sip-out-{call_id}",
+        direction="outbound",
+        caller_did="Carrier Assigned",
+        callee_did="+971500000000",
+        agent_id="wasid-ai-automation-master",
+    )
+    assert call["call_id"] == call_id
+    assert call["status"] == "active"
+
+    ended = await telephony_db.record_call_end(
+        call_id=call_id,
+        duration_seconds=95,
+        status="completed",
+        outcome="customer_connected",
+    )
+    assert ended["duration_seconds"] == 95
+    assert ended["status"] == "completed"
+    assert ended["outcome"] == "customer_connected"

@@ -41,6 +41,14 @@ async def lifespan(app: FastAPI):
     else:
         print("✅ All required environment variables are set")
 
+    # Initialize Telephony Database
+    try:
+        from app.services.db import telephony_db
+        await telephony_db.init_db()
+        print("✅ Telephony PostgreSQL/SQLite Database initialized")
+    except Exception as e:
+        print(f"⚠️ Failed to initialize Telephony Database: {e}")
+
     yield
 
     # Shutdown
