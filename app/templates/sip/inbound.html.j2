@@ -130,6 +130,7 @@
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                 <input type="hidden" name="did" value="{{ item.did }}">
                                 <input type="hidden" name="tenant_id" value="{{ item.tenant_id }}">
+                                <input type="hidden" name="tenant_name" value="{{ item.tenant_name }}">
                                 <select name="agent_name" class="form-select form-select-sm" style="width: auto; font-size: 0.8125rem; background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border-color);">
                                     <option value="wasid-ai-automation-master" {% if item.agent_id == 'wasid-ai-automation-master' %}selected{% endif %}>wasid-ai-automation-master</option>
                                     <option value="wasid-customer-master" {% if item.agent_id == 'wasid-customer-master' %}selected{% endif %}>wasid-customer-master</option>

@@ -5,6 +5,7 @@ Establishes deterministic routing chains:
   Outbound: WASID Agent -> Unique Room (sip-out-*) -> Agent Worker -> LiveKit SIP Participant -> Outbound Trunk -> Vobiz -> Destination
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -265,6 +266,71 @@ class SipRoutingService:
             }
         }
 
+    async def find_existing_dispatch_rule(
+        self,
+        lk,
+        agent_name: str,
+        preferred_rule_id: Optional[str] = None,
+        dispatch_rules: Optional[List[Any]] = None,
+    ) -> Optional[Any]:
+        """Find an existing appropriate LiveKit dispatch rule for the given agent."""
+        if dispatch_rules is None:
+            dispatch_rules = []
+            if hasattr(lk, "list_sip_dispatch_rules"):
+                try:
+                    res = lk.list_sip_dispatch_rules()
+                    if asyncio.iscoroutine(res):
+                        dispatch_rules = await res
+                    elif isinstance(res, list):
+                        dispatch_rules = res
+                except Exception as e:
+                    logger.warning("Failed to list dispatch rules when searching: %s", e)
+
+        # 1. Match by preferred_rule_id if valid
+        if preferred_rule_id:
+            for r in dispatch_rules:
+                if getattr(r, "sip_dispatch_rule_id", "") == preferred_rule_id:
+                    return r
+
+        # 2. Match by bound agent in room_config
+        for r in dispatch_rules:
+            rc = getattr(r, "room_config", None)
+            if rc and hasattr(rc, "agents"):
+                for ag in rc.agents:
+                    if getattr(ag, "agent_name", "") == agent_name:
+                        return r
+
+        # 3. Match by name
+        expected_names = {
+            f"WASID Vobiz Inbound ({agent_name})".lower(),
+            f"WASID Inbound ({agent_name})".lower(),
+        }
+        if agent_name == CANONICAL_CUSTOMER_AGENT:
+            expected_names.add("wasid customer inbound master")
+            expected_names.add("wasid customer master")
+        elif agent_name == CANONICAL_MASTER_AGENT:
+            expected_names.add("wasid vobiz inbound master")
+            expected_names.add("wasid master")
+
+        for r in dispatch_rules:
+            rname = (getattr(r, "name", "") or "").lower()
+            if rname in expected_names or f"({agent_name})".lower() in rname:
+                return r
+
+        # 4. Match by metadata
+        for r in dispatch_rules:
+            meta = getattr(r, "metadata", "") or ""
+            if f'"{agent_name}"' in meta or f"'{agent_name}'" in meta:
+                return r
+
+        # 5. Canonical fallback ID match in live rules
+        canonical_target_id = "SDR_8N7DJE97PAze" if agent_name == CANONICAL_CUSTOMER_AGENT else "SDR_qgCxptTPBnyh"
+        for r in dispatch_rules:
+            if getattr(r, "sip_dispatch_rule_id", "") == canonical_target_id:
+                return r
+
+        return None
+
     async def reassign_did_routing(
         self,
         lk,
@@ -273,29 +339,46 @@ class SipRoutingService:
         tenant_id: Optional[str] = None,
         tenant_name: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Reassigns a DID to a canonical agent, updating PostgreSQL and synchronizing LiveKit dispatch."""
+        """Reassigns a DID to a canonical agent, updating PostgreSQL and synchronizing LiveKit dispatch idempotently."""
         if agent_name not in CANONICAL_AGENTS:
             raise ValueError(f"Invalid agent '{agent_name}'. Must be one of {CANONICAL_AGENTS}")
 
-        # Provision/update LiveKit dispatch rule for this agent
+        # 1. Check the authoritative PostgreSQL DID/tenant/agent assignment first
+        existing_rec = await telephony_db.get_did_routing(did)
+
+        # Preserve existing tenant data if not explicitly provided
+        target_tenant_id = tenant_id or (existing_rec.get("tenant_id") if existing_rec else None) or DEFAULT_TENANT_ID
+        target_tenant_name = tenant_name or (existing_rec.get("tenant_name") if existing_rec else None) or "WASID Operations"
+        existing_rule_id = existing_rec.get("dispatch_rule_id") if existing_rec else None
+        inbound_trunk_id = (existing_rec.get("inbound_trunk_id") if existing_rec else None) or "vobiz-primary"
+
+        # 2 & 3. Check existing LiveKit SIP trunks/dispatch rules before creating anything
+        # Reuse/update the existing appropriate persistent LiveKit routing object
         rule_res = await self.provision_vobiz_canonical_rule(
             lk=lk,
             agent_name=agent_name,
             room_prefix=DEFAULT_INBOUND_ROOM_PREFIX,
+            preferred_rule_id=existing_rule_id,
         )
-        rule_id = rule_res.get("rule_id", "SDR_qgCxptTPBnyh")
+        default_fallback_rule = "SDR_8N7DJE97PAze" if agent_name == CANONICAL_CUSTOMER_AGENT else "SDR_qgCxptTPBnyh"
+        rule_id = rule_res.get("rule_id") or default_fallback_rule
 
-        # Upsert in PostgreSQL
+        # 8. PostgreSQL remains the authoritative WASID source of truth
         updated = await telephony_db.upsert_did_routing(
             did=did,
             agent_id=agent_name,
-            tenant_id=tenant_id,
-            tenant_name=tenant_name,
+            tenant_id=target_tenant_id,
+            tenant_name=target_tenant_name,
+            provider="vobiz",
+            inbound_trunk_id=inbound_trunk_id,
             dispatch_rule_id=rule_id,
             room_prefix=DEFAULT_INBOUND_ROOM_PREFIX,
             is_active=True,
         )
-        logger.info("Successfully reassigned DID %s -> %s (rule: %s) in PostgreSQL & LiveKit", did, agent_name, rule_id)
+        logger.info(
+            "Successfully assigned DID %s -> %s (tenant: %s, rule: %s, status: %s) in PostgreSQL & LiveKit",
+            did, agent_name, target_tenant_id, rule_id, rule_res.get("status", "synced")
+        )
         return updated
 
     async def provision_vobiz_canonical_rule(
@@ -304,8 +387,15 @@ class SipRoutingService:
         trunk_ids: Optional[List[str]] = None,
         agent_name: str = CANONICAL_MASTER_AGENT,
         room_prefix: str = DEFAULT_INBOUND_ROOM_PREFIX,
+        preferred_rule_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Provisions the canonical individual dispatch rule binding inbound SIP calls to the canonical agent with unique rooms."""
+        """Provisions or reuses the canonical dispatch rule binding inbound SIP calls to the canonical agent.
+        
+        Guarantees idempotency:
+          - Reuses existing persistent LiveKit dispatch rules when available.
+          - Only updates if modification is strictly required.
+          - Never duplicates dispatch rules on repeated assignment attempts.
+        """
         name = f"WASID Vobiz Inbound ({agent_name})"
         metadata = json.dumps({
             "tenant_id": DEFAULT_TENANT_ID,
@@ -315,23 +405,118 @@ class SipRoutingService:
             "room_prefix": room_prefix,
         })
 
-        res = await lk.create_sip_dispatch_rule(
-            name=name,
-            trunk_ids=trunk_ids or [],
-            dispatch_rule_type="individual",
-            room_prefix=room_prefix,
+        # 1. Fetch existing dispatch rules
+        dispatch_rules = []
+        if hasattr(lk, "list_sip_dispatch_rules"):
+            try:
+                res = lk.list_sip_dispatch_rules()
+                if asyncio.iscoroutine(res):
+                    dispatch_rules = await res
+                elif isinstance(res, list):
+                    dispatch_rules = res
+            except Exception as e:
+                logger.warning("Failed to list dispatch rules in provision_vobiz_canonical_rule: %s", e)
+
+        # 2. Check if an appropriate rule already exists
+        existing_rule = await self.find_existing_dispatch_rule(
+            lk=lk,
             agent_name=agent_name,
-            agent_metadata=metadata,
-            metadata=metadata,
+            preferred_rule_id=preferred_rule_id,
+            dispatch_rules=dispatch_rules,
         )
-        return {
-            "status": "success",
-            "rule_id": getattr(res, "sip_dispatch_rule_id", str(res)),
-            "name": name,
-            "agent_name": agent_name,
-            "room_prefix": room_prefix,
-            "room_strategy": f"{room_prefix}{{caller}}_{{suffix}}",
-        }
+
+        if existing_rule:
+            rule_id = getattr(existing_rule, "sip_dispatch_rule_id", preferred_rule_id or "")
+            rule_name = getattr(existing_rule, "name", name)
+            logger.info("Found existing LiveKit SIP dispatch rule %s ('%s') for agent '%s' — reusing without recreation.", rule_id, rule_name, agent_name)
+
+            # Check if agent binding is already in room_config
+            bound_agents = []
+            rc = getattr(existing_rule, "room_config", None)
+            if rc and hasattr(rc, "agents"):
+                bound_agents = [getattr(ag, "agent_name", "") for ag in rc.agents]
+
+            needs_update = False
+            if agent_name not in bound_agents and hasattr(lk, "update_sip_dispatch_rule"):
+                needs_update = True
+
+            if needs_update:
+                try:
+                    logger.info("Updating existing dispatch rule %s to bind canonical agent '%s'", rule_id, agent_name)
+                    await lk.update_sip_dispatch_rule(
+                        sip_dispatch_rule_id=rule_id,
+                        name=rule_name,
+                        trunk_ids=list(getattr(existing_rule, "trunk_ids", [])) or trunk_ids,
+                        dispatch_rule_type="individual",
+                        room_prefix=room_prefix,
+                        agent_name=agent_name,
+                        agent_metadata=metadata,
+                        metadata=metadata,
+                    )
+                except Exception as ue:
+                    logger.warning("Non-fatal: could not update dispatch rule %s: %s", rule_id, ue)
+
+            return {
+                "status": "reused",
+                "rule_id": rule_id,
+                "name": rule_name,
+                "agent_name": agent_name,
+                "room_prefix": room_prefix,
+                "room_strategy": f"{room_prefix}{{caller}}_{{suffix}}",
+            }
+
+        # 3. If no existing rule was found, create it safely
+        try:
+            res = await lk.create_sip_dispatch_rule(
+                name=name,
+                trunk_ids=trunk_ids or [],
+                dispatch_rule_type="individual",
+                room_prefix=room_prefix,
+                agent_name=agent_name,
+                agent_metadata=metadata,
+                metadata=metadata,
+            )
+            rule_id = getattr(res, "sip_dispatch_rule_id", str(res))
+            logger.info("Created new LiveKit SIP dispatch rule %s ('%s') for agent '%s'", rule_id, name, agent_name)
+            return {
+                "status": "created",
+                "rule_id": rule_id,
+                "name": name,
+                "agent_name": agent_name,
+                "room_prefix": room_prefix,
+                "room_strategy": f"{room_prefix}{{caller}}_{{suffix}}",
+            }
+        except Exception as e:
+            err_str = str(e)
+            if "already exists" in err_str.lower() or "400" in err_str:
+                logger.warning("Dispatch rule creation collision detected (%s). Re-querying to adopt existing rule...", e)
+                try:
+                    refetched_rules = []
+                    if hasattr(lk, "list_sip_dispatch_rules"):
+                        r_list = lk.list_sip_dispatch_rules()
+                        refetched_rules = (await r_list) if asyncio.iscoroutine(r_list) else r_list
+                    adopted = await self.find_existing_dispatch_rule(
+                        lk=lk,
+                        agent_name=agent_name,
+                        preferred_rule_id=preferred_rule_id,
+                        dispatch_rules=refetched_rules,
+                    )
+                    if adopted:
+                        a_id = getattr(adopted, "sip_dispatch_rule_id", "")
+                        a_name = getattr(adopted, "name", name)
+                        logger.info("Successfully adopted existing dispatch rule %s ('%s')", a_id, a_name)
+                        return {
+                            "status": "reused",
+                            "rule_id": a_id,
+                            "name": a_name,
+                            "agent_name": agent_name,
+                            "room_prefix": room_prefix,
+                            "room_strategy": f"{room_prefix}{{caller}}_{{suffix}}",
+                        }
+                except Exception as re_err:
+                    logger.warning("Failed during fallback adoption: %s", re_err)
+
+            raise
 
     async def initiate_outbound_call(
         self,

@@ -112,6 +112,7 @@ async def test_did_routing_postgresql_sync_and_reassign():
     # Reassign DID to wasid-customer-master
     service = SipRoutingService()
     lk = MagicMock()
+    lk.list_sip_dispatch_rules = AsyncMock(return_value=[])
     rule_mock = MagicMock(sip_dispatch_rule_id="SDR_test_999")
     lk.create_sip_dispatch_rule = AsyncMock(return_value=rule_mock)
 
@@ -137,6 +138,125 @@ async def test_did_routing_postgresql_sync_and_reassign():
             did="+971501234567",
             agent_name="invalid-fake-agent",
         )
+
+
+@pytest.mark.asyncio
+async def test_did_routing_idempotent_and_reuses_existing_rule():
+    """Verify that DID assignment is idempotent, reuses existing LiveKit dispatch rules, and never creates duplicates."""
+    from app.services.db import telephony_db
+    await telephony_db.init_db()
+
+    # Pre-seed a DID for FitZone
+    test_did = "+971509998877"
+    await telephony_db.upsert_did_routing(
+        did=test_did,
+        agent_id="wasid-customer-master",
+        tenant_id="TYON268696498",
+        tenant_name="FitZone Gym",
+        dispatch_rule_id="SDR_8N7DJE97PAze",
+    )
+
+    # Mock LiveKit with existing persistent rules
+    existing_rule_customer = MagicMock()
+    existing_rule_customer.sip_dispatch_rule_id = "SDR_8N7DJE97PAze"
+    existing_rule_customer.name = "WASID Customer Inbound Master"
+    existing_rule_customer.trunk_ids = ["ST_kcrc2jpfVgJ8"]
+    agent_dispatch = MagicMock(agent_name="wasid-customer-master", metadata='{"tenant": "customer"}')
+    existing_rule_customer.room_config = MagicMock(agents=[agent_dispatch])
+
+    existing_rule_master = MagicMock()
+    existing_rule_master.sip_dispatch_rule_id = "SDR_qgCxptTPBnyh"
+    existing_rule_master.name = "WASID Vobiz Inbound Master"
+    existing_rule_master.trunk_ids = []
+    agent_dispatch_master = MagicMock(agent_name="wasid-ai-automation-master", metadata='{}')
+    existing_rule_master.room_config = MagicMock(agents=[agent_dispatch_master])
+
+    lk = MagicMock()
+    lk.list_sip_dispatch_rules = AsyncMock(return_value=[existing_rule_customer, existing_rule_master])
+    lk.create_sip_dispatch_rule = AsyncMock()
+    lk.update_sip_dispatch_rule = AsyncMock()
+
+    service = SipRoutingService()
+
+    # Attempt 1: Assign to wasid-customer-master
+    res1 = await service.reassign_did_routing(
+        lk=lk,
+        did=test_did,
+        agent_name="wasid-customer-master",
+        tenant_id="TYON268696498",
+        tenant_name="FitZone Gym",
+    )
+    assert res1["agent_id"] == "wasid-customer-master"
+    assert res1["dispatch_rule_id"] == "SDR_8N7DJE97PAze"
+    assert res1["tenant_id"] == "TYON268696498"
+    assert res1["tenant_name"] == "FitZone Gym"
+    # CreateSIPDispatchRule MUST NOT have been called
+    assert lk.create_sip_dispatch_rule.call_count == 0
+
+    # Attempt 2: Repeat the EXACT same assignment (idempotency check)
+    res2 = await service.reassign_did_routing(
+        lk=lk,
+        did=test_did,
+        agent_name="wasid-customer-master",
+        tenant_id="TYON268696498",
+        tenant_name="FitZone Gym",
+    )
+    assert res2["agent_id"] == "wasid-customer-master"
+    assert res2["dispatch_rule_id"] == "SDR_8N7DJE97PAze"
+    assert res2["tenant_id"] == "TYON268696498"
+    assert res2["tenant_name"] == "FitZone Gym"
+    # Still zero calls to create_sip_dispatch_rule
+    assert lk.create_sip_dispatch_rule.call_count == 0
+
+    # Verify PostgreSQL has exactly 1 authoritative record for this DID
+    rec = await telephony_db.get_did_routing(test_did)
+    assert rec is not None
+    assert rec["did"] == test_did
+    assert rec["agent_id"] == "wasid-customer-master"
+    assert rec["tenant_id"] == "TYON268696498"
+    assert rec["tenant_name"] == "FitZone Gym"
+    assert rec["dispatch_rule_id"] == "SDR_8N7DJE97PAze"
+
+
+@pytest.mark.asyncio
+async def test_did_routing_collision_fallback_recovery():
+    """Verify that if create_sip_dispatch_rule raises collision, it safely adopts the existing rule."""
+    from app.services.db import telephony_db
+    await telephony_db.init_db()
+
+    test_did = "+971509991122"
+    service = SipRoutingService()
+
+    # Create mock rule to be adopted
+    conflicting_rule = MagicMock()
+    conflicting_rule.sip_dispatch_rule_id = "SDR_8N7DJE97PAze"
+    conflicting_rule.name = "WASID Vobiz Inbound (wasid-customer-master)"
+    conflicting_rule.trunk_ids = []
+    conflicting_rule.room_config = MagicMock(agents=[MagicMock(agent_name="wasid-customer-master")])
+
+    lk = MagicMock()
+    # Initially returns empty, so it attempts creation
+    lk.list_sip_dispatch_rules = AsyncMock(side_effect=[
+        [],  # initial list is empty
+        [conflicting_rule]  # refetched list has the existing rule
+    ])
+    # create raises Twirp collision error
+    lk.create_sip_dispatch_rule = AsyncMock(
+        side_effect=Exception('TwirpError(code=invalid_argument, message=Dispatch rule for the same trunk, inbound number, number, and PIN combination already exists in dispatch rule "<new>" "WASID Vobiz Inbound (wasid-customer-master)", status=400)')
+    )
+
+    # Reassign should NOT raise error; it should gracefully adopt the conflicting rule
+    res = await service.reassign_did_routing(
+        lk=lk,
+        did=test_did,
+        agent_name="wasid-customer-master",
+        tenant_id="TYON268696498",
+        tenant_name="FitZone Gym",
+    )
+    assert res["agent_id"] == "wasid-customer-master"
+    assert res["dispatch_rule_id"] == "SDR_8N7DJE97PAze"
+    assert res["tenant_id"] == "TYON268696498"
+
 
 
 @pytest.mark.asyncio

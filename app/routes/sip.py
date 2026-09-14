@@ -790,6 +790,7 @@ async def assign_did_routing(
     did: str = Form(...),
     agent_name: str = Form(...),
     tenant_id: Optional[str] = Form(None),
+    tenant_name: Optional[str] = Form(None),
     lk: LiveKitClient = Depends(get_livekit_client),
 ):
     """Assign an inbound DID to a canonical agent in PostgreSQL and sync to LiveKit dispatch rule."""
@@ -804,6 +805,7 @@ async def assign_did_routing(
             did=did.strip(),
             agent_name=agent_name.strip(),
             tenant_id=tenant_id.strip() if tenant_id else None,
+            tenant_name=tenant_name.strip() if tenant_name else None,
         )
         msg = quote(f"DID {did} successfully mapped to '{agent_name}' in PostgreSQL & LiveKit.")
         return RedirectResponse(url=f"/sip-inbound?flash_message={msg}&flash_type=success", status_code=303)
