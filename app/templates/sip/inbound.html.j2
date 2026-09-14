@@ -39,8 +39,10 @@
         <div class="stat-label">
             <i class="bi bi-shield-check"></i> LiveKit Sync Status
         </div>
-        <div class="stat-value {% if routing_matrix and routing_matrix.drift_did_count > 0 %}warning{% else %}success{% endif %}">
-            {% if routing_matrix and routing_matrix.drift_did_count > 0 %}
+        <div class="stat-value {% if not routing_matrix or routing_matrix.authoritative_did_count == 0 %}info{% elif routing_matrix.drift_did_count > 0 %}warning{% else %}success{% endif %}">
+            {% if not routing_matrix or routing_matrix.authoritative_did_count == 0 %}
+                0 Active DIDs
+            {% elif routing_matrix.drift_did_count > 0 %}
                 {{ routing_matrix.in_sync_did_count }}/{{ routing_matrix.authoritative_did_count }} Synced
             {% else %}
                 100% In-Sync
@@ -143,8 +145,8 @@
             </table>
         </div>
         {% else %}
-        <div class="alert alert-info mb-0">
-            <i class="bi bi-info-circle"></i> No DIDs configured in PostgreSQL yet. Initializing seed data...
+        <div class="alert alert-secondary mb-0 text-center py-4" style="background: rgba(30, 41, 59, 0.5); border: 1px dashed rgba(255, 255, 255, 0.15); color: var(--text-secondary);">
+            <i class="bi bi-info-circle me-2"></i> No customer DIDs are currently assigned.
         </div>
         {% endif %}
     </div>

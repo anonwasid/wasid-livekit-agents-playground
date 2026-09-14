@@ -980,19 +980,21 @@
         </div>
 
         <!-- Authoritative DIDs from PostgreSQL Global Source of Truth -->
-        {% if routing_matrix and routing_matrix.did_routings %}
         <div class="mt-4 pt-3 border-top border-secondary border-opacity-25">
             <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
                 <h6 class="text-white mb-0 d-flex align-items-center gap-2">
                     <i class="bi bi-database-check text-info"></i>
                     <span>Authoritative Telephony DIDs (PostgreSQL Global Source of Truth)</span>
-                    <span class="badge bg-primary bg-opacity-20 text-primary border border-primary border-opacity-25">{{ routing_matrix.authoritative_did_count }} DIDs</span>
+                    <span class="badge bg-primary bg-opacity-20 text-primary border border-primary border-opacity-25">{{ routing_matrix.authoritative_did_count if routing_matrix else 0 }} DIDs</span>
                 </h6>
                 <div class="d-flex align-items-center gap-2">
+                    {% if routing_matrix and routing_matrix.authoritative_did_count > 0 %}
                     <span class="badge bg-success bg-opacity-15 text-success border border-success border-opacity-25">
-                        <i class="bi bi-check2-all me-1"></i> {{ routing_matrix.in_sync_did_count }} In-Sync (100%)
+                        <i class="bi bi-check2-all me-1"></i> {{ routing_matrix.in_sync_did_count }}/{{ routing_matrix.authoritative_did_count }} In-Sync
                     </span>
-                    <span class="badge bg-dark border border-secondary text-secondary">0 Drift</span>
+                    {% else %}
+                    <span class="badge bg-dark border border-secondary text-secondary">0 Assigned</span>
+                    {% endif %}
                 </div>
             </div>
             <div class="table-responsive">
@@ -1009,6 +1011,7 @@
                         </tr>
                     </thead>
                     <tbody>
+                        {% if routing_matrix and routing_matrix.did_routings %}
                         {% for d in routing_matrix.did_routings %}
                         <tr>
                             <td class="mono-cell fw-bold text-info">{{ d.did }}</td>
@@ -1036,11 +1039,17 @@
                             </td>
                         </tr>
                         {% endfor %}
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="text-center py-4 text-muted">
+                                No customer DIDs are currently assigned in PostgreSQL.
+                            </td>
+                        </tr>
+                        {% endif %}
                     </tbody>
                 </table>
             </div>
         </div>
-        {% endif %}
     </div>
 
     <!-- 4. Live Telephony Sessions & Dispatches Section -->

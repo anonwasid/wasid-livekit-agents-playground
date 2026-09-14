@@ -102,9 +102,9 @@ async def test_did_routing_postgresql_sync_and_reassign():
         tenant_name="WASID HQ / Operations",
     )
 
-    # Verify seed DIDs are loaded
+    # Verify upserted DID is loaded (zero fake seed DIDs loaded)
     dids = await telephony_db.get_all_did_routings()
-    assert len(dids) >= 8
+    assert len(dids) >= 1
     hq_did = await telephony_db.get_did_routing("+971501234567")
     assert hq_did is not None
     assert hq_did["agent_id"] == "wasid-ai-automation-master"

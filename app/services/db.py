@@ -111,89 +111,19 @@ class CallRecord(Base):
         }
 
 
-# Canonical DID Seed Data derived from authoritative PostgreSQL tenant bindings
-CANONICAL_DID_SEEDS = [
-    {
-        "did": "+971501234567",
-        "tenant_id": "TGLX965152579",
-        "tenant_name": "WASID HQ / Operations",
-        "agent_id": "wasid-ai-automation-master",
-        "provider": "vobiz",
-        "inbound_trunk_id": "ST_kcrc2jpfVgJ8",
-        "dispatch_rule_id": "SDR_qgCxptTPBnyh",
-        "room_prefix": "sip-in-",
-    },
-    {
-        "did": "+97141234567",
-        "tenant_id": "TZEE794100737",
-        "tenant_name": "FitZone Gym Dubai",
-        "agent_id": "wasid-customer-master",
-        "provider": "vobiz",
-        "inbound_trunk_id": "ST_kcrc2jpfVgJ8",
-        "dispatch_rule_id": "SDR_8N7DJE97PAze",
-        "room_prefix": "sip-in-",
-    },
-    {
-        "did": "+971501112233",
-        "tenant_id": "TZEE794100737",
-        "tenant_name": "FitZone Gym Dubai (VIP)",
-        "agent_id": "wasid-customer-master",
-        "provider": "vobiz",
-        "inbound_trunk_id": "ST_kcrc2jpfVgJ8",
-        "dispatch_rule_id": "SDR_8N7DJE97PAze",
-        "room_prefix": "sip-in-",
-    },
-    {
-        "did": "+97143435333",
-        "tenant_id": "TSQZ905389656",
-        "tenant_name": "Al Safadi Gourmet",
-        "agent_id": "wasid-customer-master",
-        "provider": "vobiz",
-        "inbound_trunk_id": "ST_kcrc2jpfVgJ8",
-        "dispatch_rule_id": "SDR_8N7DJE97PAze",
-        "room_prefix": "sip-in-",
-    },
-    {
-        "did": "+97143435334",
-        "tenant_id": "TSQZ905389656",
-        "tenant_name": "Al Safadi Gourmet (Reservations)",
-        "agent_id": "wasid-customer-master",
-        "provider": "vobiz",
-        "inbound_trunk_id": "ST_kcrc2jpfVgJ8",
-        "dispatch_rule_id": "SDR_8N7DJE97PAze",
-        "room_prefix": "sip-in-",
-    },
-    {
-        "did": "+97143624788",
-        "tenant_id": "TBNY613619934",
-        "tenant_name": "ABC Dental Clinic",
-        "agent_id": "wasid-customer-master",
-        "provider": "vobiz",
-        "inbound_trunk_id": "ST_kcrc2jpfVgJ8",
-        "dispatch_rule_id": "SDR_8N7DJE97PAze",
-        "room_prefix": "sip-in-",
-    },
-    {
-        "did": "+1800WASIDAI",
-        "tenant_id": "TGLX965152579",
-        "tenant_name": "WASID HQ International",
-        "agent_id": "wasid-ai-automation-master",
-        "provider": "vobiz",
-        "inbound_trunk_id": "ST_kcrc2jpfVgJ8",
-        "dispatch_rule_id": "SDR_qgCxptTPBnyh",
-        "room_prefix": "sip-in-",
-    },
-    {
-        "did": "+91800WASIDAI",
-        "tenant_id": "TGLX965152579",
-        "tenant_name": "WASID India Operations",
-        "agent_id": "wasid-ai-automation-master",
-        "provider": "vobiz",
-        "inbound_trunk_id": "ST_kcrc2jpfVgJ8",
-        "dispatch_rule_id": "SDR_qgCxptTPBnyh",
-        "room_prefix": "sip-in-",
-    },
-]
+# No synthetic or fabricated seed DIDs in production. Authoritative data flows solely from PostgreSQL.
+CANONICAL_DID_SEEDS: List[Dict[str, Any]] = []
+
+SYNTHETIC_SEED_DIDS = {
+    "+971501234567",
+    "+97141234567",
+    "+971501112233",
+    "+97143435333",
+    "+97143435334",
+    "+97143624788",
+    "+1800WASIDAI",
+    "+91800WASIDAI",
+}
 
 
 class TelephonyDatabase:
@@ -214,7 +144,7 @@ class TelephonyDatabase:
                 url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
             return url
 
-        # Fallback to local SQLite
+        # Fallback to local SQLite for local testing only
         db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "wasid_telephony.db"))
         return f"sqlite+aiosqlite:///{db_path}"
 
@@ -244,7 +174,7 @@ class TelephonyDatabase:
         return self._sessionmaker
 
     async def init_db(self) -> None:
-        """Initialize database schema and seed canonical DIDs."""
+        """Initialize database schema and purge legacy synthetic seed DIDs."""
         if self._initialized:
             return
 
@@ -252,40 +182,17 @@ class TelephonyDatabase:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
-        # Seed initial canonical DIDs and migrate legacy tenant IDs
+        # Purge legacy mock/synthetic seed records from database
         sessionmaker = self.get_sessionmaker()
         async with sessionmaker() as session:
             async with session.begin():
                 result = await session.execute(select(DidRoutingRecord))
                 existing = {row.did: row for row in result.scalars()}
 
-                # Purge legacy mock tenant records
                 for did, row in list(existing.items()):
-                    if row.tenant_id == "CIT49119004":
+                    if did in SYNTHETIC_SEED_DIDS or row.tenant_id in ("CIT49119004", "TZEE794100737"):
                         await session.delete(row)
                         del existing[did]
-
-                for seed in CANONICAL_DID_SEEDS:
-                    if seed["did"] not in existing:
-                        record = DidRoutingRecord(
-                            did=seed["did"],
-                            tenant_id=seed["tenant_id"],
-                            tenant_name=seed["tenant_name"],
-                            agent_id=seed["agent_id"],
-                            provider=seed["provider"],
-                            inbound_trunk_id=seed.get("inbound_trunk_id"),
-                            dispatch_rule_id=seed.get("dispatch_rule_id"),
-                            room_prefix=seed.get("room_prefix", "sip-in-"),
-                            is_active=True,
-                        )
-                        session.add(record)
-                    else:
-                        # Migrate legacy tenant_id if it differs from canonical
-                        row = existing[seed["did"]]
-                        if row.tenant_id != seed["tenant_id"]:
-                            row.tenant_id = seed["tenant_id"]
-                            row.tenant_name = seed["tenant_name"]
-                            row.agent_id = seed["agent_id"]
 
         self._initialized = True
         logger.info(

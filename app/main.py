@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.routes import overview, rooms, egress, ingress, sip, settings, sandbox, auth, agents, homer, search, views, alerts, audit, diagnostics, events
+from app.security.basic_auth import get_current_user
 from app.security.csrf import get_csrf_token
 from app.utils.formatters import format_duration, format_pct, status_color, format_number
 
@@ -65,11 +66,54 @@ app = FastAPI(
     redoc_url=None,  # Disable ReDoc in production
 )
 
-# Add security middleware
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=os.environ.get("APP_SECRET_KEY", "dev-secret-key-change-in-production"),
-)
+# Route protection and authentication guard middleware
+@app.middleware("http")
+async def auth_guard_middleware(request: Request, call_next):
+    """
+    Enterprise Authentication Guard:
+    Intercepts and validates sessions / basic auth on all routes.
+    Whitelisted public paths:
+    - /login
+    - /logout
+    - /health
+    - /static/*
+    - /favicon.ico
+    """
+    path = request.url.path
+
+    # Allow public endpoints
+    if (
+        path in ("/login", "/logout", "/health", "/favicon.ico")
+        or path.startswith("/static/")
+    ):
+        return await call_next(request)
+
+    user = get_current_user(request)
+    if user:
+        request.state.user = user
+        return await call_next(request)
+
+    # If unauthenticated, determine response type
+    # Check if request is HTMX
+    if request.headers.get("hx-request") == "true":
+        from fastapi.responses import Response as _Resp
+        target = f"/login?next={path}"
+        return _Resp(status_code=401, headers={"HX-Redirect": target})
+
+    # Check if request is browser HTML navigation
+    accept = request.headers.get("accept", "").lower()
+    if ("text/html" in accept) and (request.method == "GET"):
+        from fastapi.responses import RedirectResponse
+        target = f"/login?next={path}"
+        return RedirectResponse(url=target, status_code=307)
+
+    # API / non-HTML requests return 401 with WWW-Authenticate header
+    from fastapi.responses import Response as _Resp
+    return _Resp(
+        content="Authentication required",
+        status_code=401,
+        headers={"WWW-Authenticate": 'Basic realm="WASID LiveKit Control Center"'},
+    )
 
 
 @app.middleware("http")
@@ -84,11 +128,20 @@ async def enforce_readonly_mode(request: Request, call_next):
     """Block mutating requests when DASHBOARD_ROLE=readonly."""
     if os.environ.get("DASHBOARD_ROLE", "admin").lower() == "readonly":
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
-            if not request.url.path.startswith("/auth"):
+            if not request.url.path.startswith("/auth") and request.url.path not in ("/login", "/logout"):
                 from fastapi.responses import Response as _Resp
                 return _Resp("Read-only mode — mutations are disabled.", status_code=403)
     return await call_next(request)
 
+
+# Session middleware MUST wrap around HTTP middleware to populate request.session first
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ.get("APP_SECRET_KEY", "dev-secret-key-change-in-production"),
+    session_cookie="wasid_lk_session",
+    max_age=86400,
+    same_site="lax",
+)
 
 # Add CORS middleware (restrictive by default)
 app.add_middleware(
@@ -110,6 +163,7 @@ templates.env.globals["css_version"] = CSS_VERSION
 templates.env.globals["homer_enabled"] = lambda: os.environ.get("ENABLE_HOMER", "false").lower() == "true"
 templates.env.globals["sip_enabled"] = lambda: os.environ.get("ENABLE_SIP", "false").lower() == "true"
 templates.env.globals["is_readonly"] = lambda: os.environ.get("DASHBOARD_ROLE", "admin").lower() == "readonly"
+templates.env.globals["get_current_user"] = get_current_user
 
 
 def _datetimeformat(value: int) -> str:
