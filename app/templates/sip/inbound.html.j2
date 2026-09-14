@@ -740,8 +740,12 @@
                     </div>
                     <div class="mb-3">
                         <label for="agent_name" class="form-label">Agent Name</label>
-                        <input type="text" class="form-control" id="agent_name" name="agent_name" placeholder="e.g., inbound-agent">
-                        <small class="form-text text-muted">Name of the agent to dispatch to the room</small>
+                        <select class="form-select" id="agent_name" name="agent_name">
+                            <option value="">None / Direct Room Only</option>
+                            <option value="wasid-customer-master" selected>wasid-customer-master (Customer Voice Fleet)</option>
+                            <option value="wasid-ai-automation-master">wasid-ai-automation-master (Platform Operations & Multi-tenant Dispatch)</option>
+                        </select>
+                        <small class="form-text text-muted">Select canonical WASID agent to dispatch to the room</small>
                     </div>
                     <div class="mb-3">
                         <label for="agent_metadata" class="form-label">Agent Metadata (Optional)</label>
@@ -955,8 +959,12 @@
                     </div>
                     <div class="mb-3">
                         <label for="edit_agent_name" class="form-label">Agent Name</label>
-                        <input type="text" class="form-control" id="edit_agent_name" name="agent_name" placeholder="e.g., inbound-agent">
-                        <small class="form-text text-muted">Name of the agent to dispatch to the room. Leave empty to remove agent</small>
+                        <select class="form-select" id="edit_agent_name" name="agent_name">
+                            <option value="">None / Direct Room Only</option>
+                            <option value="wasid-customer-master">wasid-customer-master (Customer Voice Fleet)</option>
+                            <option value="wasid-ai-automation-master">wasid-ai-automation-master (Platform Operations & Multi-tenant Dispatch)</option>
+                        </select>
+                        <small class="form-text text-muted">Select canonical WASID agent to dispatch to the room. Select None to remove agent</small>
                     </div>
                     <div class="mb-3">
                         <label for="edit_agent_metadata" class="form-label">Agent Metadata (Optional)</label>
@@ -1621,8 +1629,16 @@ function editRule(ruleId, name, trunkIds, dispatchRuleType, roomNameOrPrefix, pi
     }
     
     document.getElementById('edit_pin').value = pin || '';
-    document.getElementById('edit_hide_phone_number').checked = hidePhoneNumber === true || hidePhoneNumber === 'true';
-    document.getElementById('edit_agent_name').value = agentName || '';
+    var editAgentSelect = document.getElementById('edit_agent_name');
+    if (editAgentSelect) {
+        if (agentName && ![...editAgentSelect.options].some(function(o) { return o.value === agentName; })) {
+            var opt = document.createElement('option');
+            opt.value = agentName;
+            opt.textContent = agentName + ' (Custom)';
+            editAgentSelect.appendChild(opt);
+        }
+        editAgentSelect.value = agentName || '';
+    }
     document.getElementById('edit_agent_metadata').value = agentMetadata || '';
     document.getElementById('edit_rule_metadata').value = metadata || '';
     

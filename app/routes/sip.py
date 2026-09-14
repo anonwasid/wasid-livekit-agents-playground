@@ -165,9 +165,12 @@ async def create_sip_trunk(
             except json.JSONDecodeError:
                 pass
 
+        # Carrier outbound SIP proxy default (Vobiz carrier / LiveKit requirement)
+        resolved_address = (address.strip() if address else None) or os.getenv("VOBIZ_SIP_OUTBOUND_ADDRESS", "sip.vobiz.com")
+
         result = await lk.create_sip_trunk(
             name=trunk_name,
-            address=address,
+            address=resolved_address,
             transport=transport,
             numbers=numbers_list,
             auth_username=username,
