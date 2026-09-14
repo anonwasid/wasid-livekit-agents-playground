@@ -282,7 +282,7 @@ class LiveKitClient:
 
         composite_request = api.RoomCompositeEgressRequest(
             room_name=room_name,
-            layout=layout,
+            layout="" if audio_only else layout,
             audio_only=audio_only,
             video_only=video_only,
             file_outputs=[file_output],

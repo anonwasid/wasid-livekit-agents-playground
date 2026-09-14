@@ -129,7 +129,7 @@ async def auto_start_room_recording(room_name: str, lk: LiveKitClient) -> Option
         egress_res = await lk.start_room_composite_egress(
             room_name=room_name,
             output_filename=object_key,
-            layout="grid",
+            layout="",
             audio_only=True,
             video_only=False,
             s3_bucket=storage_r2.bucket,
