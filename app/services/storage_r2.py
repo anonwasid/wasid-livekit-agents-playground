@@ -89,7 +89,10 @@ class StorageR2Service:
             disp_filename = filename or clean_key.split("/")[-1]
             query_params["response-content-disposition"] = f'attachment; filename="{disp_filename}"'
 
-        canonical_querystring = urllib.parse.urlencode(sorted(query_params.items()))
+        canonical_querystring = urllib.parse.urlencode(
+            sorted(query_params.items()),
+            quote_via=urllib.parse.quote,
+        )
         canonical_headers = f"host:{self.host}\n"
         signed_headers = "host"
         payload_hash = "UNSIGNED-PAYLOAD"
