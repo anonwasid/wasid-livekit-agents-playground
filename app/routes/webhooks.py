@@ -159,7 +159,7 @@ async def process_verified_event(event) -> Response:
     """Handle verified LiveKit webhook events."""
     event_name = getattr(event, "event", "") or ""
     logger.info("Processing LiveKit webhook event: %s", event_name)
-    lk = await get_livekit_client()
+    lk = get_livekit_client()
 
     if event_name in ("room_started", "participant_joined"):
         room = getattr(event, "room", None)
@@ -214,7 +214,7 @@ async def process_verified_event(event) -> Response:
 async def process_raw_webhook(data: dict) -> Response:
     """Handle raw JSON webhook payloads when signatures are bypassed or in dev mode."""
     event_name = data.get("event", "")
-    lk = await get_livekit_client()
+    lk = get_livekit_client()
 
     if event_name in ("room_started", "participant_joined"):
         room = data.get("room", {})

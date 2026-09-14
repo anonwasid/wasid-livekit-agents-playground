@@ -27,7 +27,7 @@ async def _supervise_recordings_loop():
 
     while _running:
         try:
-            lk = await get_livekit_client()
+            lk = get_livekit_client()
             rooms, _ = await lk.list_all_rooms()
             active_room_names = {getattr(r, "name", "") for r in rooms}
 
