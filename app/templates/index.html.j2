@@ -3,7 +3,7 @@
 {% block title %}Overview - LiveKit Dashboard{% endblock %}
 
 {% block page_header %}
-<div class="d-flex justify-content-between align-items-center w-100">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 w-100">
     <div>
         <h1 class="page-title">Overview</h1>
         <div class="page-subtitle">
@@ -11,8 +11,8 @@
         </div>
     </div>
     <div class="d-flex align-items-center gap-2">
-        <a href="/export.json{% if filters.as_query_params() %}?{{ filters.as_query_params() | urlencode }}{% endif %}" class="btn btn-outline-secondary btn-sm">
-            <i class="bi bi-download"></i> Export JSON
+        <a href="/export.json{% if filters.as_query_params() %}?{{ filters.as_query_params() | urlencode }}{% endif %}" class="btn btn-outline-secondary btn-sm" title="Export JSON">
+            <i class="bi bi-download"></i> <span class="d-none d-sm-inline">Export JSON</span><span class="d-sm-none">Export</span>
         </a>
     </div>
 </div>

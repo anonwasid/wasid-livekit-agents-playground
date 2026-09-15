@@ -28,12 +28,20 @@
     {% block extra_head %}{% endblock %}
 </head>
 <body>
-    <!-- Sidebar Navigation -->
-    <aside class="sidebar">
-        <a href="/" class="sidebar-brand">
-            <i class="bi bi-broadcast"></i>
-            LiveKit
-        </a>
+    <!-- Mobile Sidebar Backdrop Overlay -->
+    <div class="sidebar-backdrop" id="sidebar-backdrop" aria-hidden="true"></div>
+
+    <!-- Sidebar Navigation Drawer -->
+    <aside class="sidebar" id="sidebar" aria-label="Sidebar navigation">
+        <div class="sidebar-header">
+            <a href="/" class="sidebar-brand">
+                <i class="bi bi-broadcast text-primary"></i>
+                <span>LiveKit</span>
+            </a>
+            <button type="button" class="sidebar-close-btn d-lg-none" id="sidebar-close" aria-label="Close navigation menu">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
         
         <nav class="sidebar-nav">
             <div class="nav-section">
@@ -124,14 +132,22 @@
     <!-- Main Content -->
     <div class="main-content">
         <!-- Top Bar -->
-        <div class="top-bar">
-            {% block page_header %}
-            <div>
-                <h1 class="page-title">{% block page_title %}Dashboard{% endblock %}</h1>
-                {% block page_subtitle %}{% endblock %}
+        <header class="top-bar">
+            <div class="top-bar-left">
+                <button type="button" class="sidebar-toggle d-lg-none" id="sidebar-toggle" aria-label="Open navigation menu" aria-expanded="false" aria-controls="sidebar">
+                    <i class="bi bi-list fs-4"></i>
+                </button>
+                <div class="page-header-content">
+                    {% block page_header %}
+                    <div>
+                        <h1 class="page-title">{% block page_title %}Dashboard{% endblock %}</h1>
+                        {% block page_subtitle %}{% endblock %}
+                    </div>
+                    {% endblock %}
+                </div>
             </div>
-            {% endblock %}
-            <form class="top-bar-search" action="/search" method="get" role="search" autocomplete="off">
+
+            <form class="top-bar-search" id="top-bar-search" action="/search" method="get" role="search" autocomplete="off">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text bg-transparent border-end-0">
                         <i class="bi bi-search text-secondary"></i>
@@ -145,30 +161,31 @@
                         aria-label="Global search"
                         value="{{ request.query_params.get('q', '') if request.url.path == '/search' else '' }}"
                     >
-                    <span class="input-group-text bg-transparent border-start-0 kbd-hint text-secondary" title="Ctrl+K / ⌘K">
+                    <span class="input-group-text bg-transparent border-start-0 kbd-hint text-secondary d-none d-md-inline" title="Ctrl+K / ⌘K">
                         <kbd>⌘K</kbd>
                     </span>
                 </div>
             </form>
+
             <div class="top-bar-actions">
                 {% if is_readonly() %}
-                <span class="badge bg-secondary" title="Dashboard is in read-only mode">
+                <span class="badge bg-secondary d-none d-sm-inline-flex" title="Dashboard is in read-only mode">
                     <i class="bi bi-lock me-1"></i>Read-only
                 </span>
                 {% endif %}
                 <button id="theme-toggle" class="btn btn-sm btn-outline-secondary" title="Toggle theme" onclick="DashboardTheme.cycle()">
                     <i class="bi bi-circle-half" id="theme-icon"></i>
                 </button>
-                <div class="user-menu">
+                <div class="user-menu d-none d-sm-flex">
                     <i class="bi bi-person-circle"></i>
                     <span>{{ current_user or 'admin' }}</span>
                 </div>
-                <a href="/logout" class="btn btn-secondary btn-sm">
+                <a href="/logout" class="btn btn-secondary btn-sm" title="Logout">
                     <i class="bi bi-box-arrow-right"></i>
-                    Logout
+                    <span class="d-none d-md-inline">Logout</span>
                 </a>
             </div>
-        </div>
+        </header>
 
         <!-- Flash Messages -->
         {% if flash_message %}
@@ -195,7 +212,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
     <!-- Custom JS -->
-    <script src="/static/js/main.js"></script>
+    <script src="/static/js/main.js?v={{ css_version }}"></script>
     
     <!-- HTMX CSRF Configuration -->
     <script>

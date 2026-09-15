@@ -41,6 +41,11 @@
     border-radius: 16px;
     outline: none;
 }
+@media (max-width: 576px) {
+    .audio-player-container audio {
+        max-width: 170px;
+    }
+}
 audio::-webkit-media-controls-panel {
     background-color: var(--bg-tertiary, #1e293b);
 }
@@ -51,7 +56,7 @@ audio::-webkit-media-controls-time-remaining-display {
 </style>
 
 <!-- Stats Grid -->
-<div class="stats-grid mb-4" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+<div class="stats-grid mb-4">
     <div class="stat-card">
         <div class="stat-label">
             <i class="bi bi-disc text-primary"></i> Total Recordings
@@ -110,15 +115,15 @@ audio::-webkit-media-controls-time-remaining-display {
 <!-- Filter Toolbar -->
 <div class="card mb-4">
     <div class="card-body py-3">
-        <form method="get" action="/egress" class="row g-3 align-items-center">
-            <div class="col-md-3">
+        <form method="get" action="/egress" class="row g-2 g-md-3 align-items-center">
+            <div class="col-12 col-sm-6 col-lg-3">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
                     <input type="text" name="search" class="form-control" placeholder="Search phone, room, ID..." value="{{ search_query }}">
                 </div>
             </div>
 
-            <div class="col-md-3">
+            <div class="col-6 col-sm-6 col-lg-3">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text"><i class="bi bi-arrows-expand"></i></span>
                     <select name="direction" class="form-select" onchange="this.form.submit()">
@@ -129,7 +134,7 @@ audio::-webkit-media-controls-time-remaining-display {
                 </div>
             </div>
 
-            <div class="col-md-3">
+            <div class="col-6 col-sm-6 col-lg-3">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text"><i class="bi bi-funnel"></i></span>
                     <select name="status" class="form-select" onchange="this.form.submit()">
@@ -141,14 +146,16 @@ audio::-webkit-media-controls-time-remaining-display {
                 </div>
             </div>
 
-            <div class="col-md-3 d-flex gap-2 justify-content-end">
-                <button type="submit" class="btn btn-secondary btn-sm">
-                    <i class="bi bi-filter"></i> Apply
-                </button>
-                <a href="/egress" class="btn btn-outline-secondary btn-sm" title="Clear Filters">
-                    <i class="bi bi-x-circle"></i> Reset
-                </a>
-                <button type="button" class="btn btn-primary btn-sm ms-auto" data-bs-toggle="modal" data-bs-target="#startEgressModal">
+            <div class="col-12 col-sm-6 col-lg-3 d-flex gap-2 justify-content-between justify-content-lg-end flex-wrap">
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-secondary btn-sm">
+                        <i class="bi bi-filter"></i> Apply
+                    </button>
+                    <a href="/egress" class="btn btn-outline-secondary btn-sm" title="Clear Filters">
+                        <i class="bi bi-x-circle"></i> Reset
+                    </a>
+                </div>
+                <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#startEgressModal">
                     <i class="bi bi-plus-circle"></i> Start Egress
                 </button>
             </div>

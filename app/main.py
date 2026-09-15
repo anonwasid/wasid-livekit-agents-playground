@@ -171,7 +171,7 @@ templates = Jinja2Templates(directory="app/templates")
 
 
 # Add custom template globals
-CSS_VERSION = "0.1.0"
+CSS_VERSION = "0.2.0"
 
 templates.env.globals["css_version"] = CSS_VERSION
 templates.env.globals["homer_enabled"] = lambda: os.environ.get("ENABLE_HOMER", "false").lower() == "true"

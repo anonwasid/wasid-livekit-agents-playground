@@ -14,21 +14,21 @@
 {% endwith %}
 
 <!-- Header Actions -->
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <div style="flex: 1; max-width: 400px;">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div style="flex: 1 1 240px; max-width: 400px;">
         <form method="get" action="/rooms">
             <div class="form-group mb-0">
                 <input type="text" name="search" class="form-control" placeholder="Search rooms..." value="{{ search or filters.q or '' }}">
             </div>
         </form>
     </div>
-    <div class="d-flex gap-2 align-items-center">
-        <small class="text-muted">SDK Latency: {{ latency_ms }}ms</small>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+        <small class="text-muted d-none d-sm-inline">SDK Latency: {{ latency_ms }}ms</small>
         <a href="/rooms/export.csv{% if search or filters.q %}?search={{ (search or filters.q) | urlencode }}{% endif %}" class="btn btn-secondary btn-sm" title="Export CSV">
             <i class="bi bi-download"></i> Export CSV
         </a>
         {% if not is_readonly() %}
-        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createRoomModal">
+        <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createRoomModal">
             <i class="bi bi-plus-circle"></i> Create Room
         </button>
         {% endif %}

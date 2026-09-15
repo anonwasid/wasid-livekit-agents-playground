@@ -420,7 +420,90 @@ const DashboardTheme = (() => {
 
 window.DashboardTheme = DashboardTheme;
 
+/**
+ * Mobile Navigation Drawer controller
+ */
+const DashboardNavigation = (() => {
+    function init() {
+        const sidebar = document.getElementById('sidebar');
+        const toggleBtn = document.getElementById('sidebar-toggle');
+        const closeBtn = document.getElementById('sidebar-close');
+        const backdrop = document.getElementById('sidebar-backdrop');
+
+        if (!sidebar) return;
+
+        function openDrawer() {
+            sidebar.classList.add('show');
+            if (backdrop) backdrop.classList.add('show');
+            document.body.classList.add('sidebar-open');
+            if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
+        }
+
+        function closeDrawer() {
+            sidebar.classList.remove('show');
+            if (backdrop) backdrop.classList.remove('show');
+            document.body.classList.remove('sidebar-open');
+            if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
+        }
+
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (sidebar.classList.contains('show')) {
+                    closeDrawer();
+                } else {
+                    openDrawer();
+                }
+            });
+        }
+
+        if (closeBtn) {
+            closeBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                closeDrawer();
+            });
+        }
+
+        if (backdrop) {
+            backdrop.addEventListener('click', function(e) {
+                e.stopPropagation();
+                closeDrawer();
+            });
+        }
+
+        // Close on Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && sidebar.classList.contains('show')) {
+                closeDrawer();
+            }
+        });
+
+        // Close drawer when clicking a nav link on mobile
+        const navLinks = sidebar.querySelectorAll('.nav-link');
+        navLinks.forEach(link => {
+            link.addEventListener('click', function() {
+                if (window.innerWidth < 992) {
+                    closeDrawer();
+                }
+            });
+        });
+
+        // Auto-close drawer if window resized to desktop size
+        window.addEventListener('resize', function() {
+            if (window.innerWidth >= 992 && sidebar.classList.contains('show')) {
+                closeDrawer();
+            }
+        });
+    }
+
+    return { init };
+})();
+
+window.DashboardNavigation = DashboardNavigation;
+
 document.addEventListener('DOMContentLoaded', function () {
     if (window.DashboardTheme) DashboardTheme.init();
+    if (window.DashboardNavigation) DashboardNavigation.init();
 });
+
 
