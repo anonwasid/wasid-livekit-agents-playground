@@ -184,10 +184,24 @@ class GeminiTranscriptionService:
         """Resilient fallback transcribing audio bytes using Gemini multimodal REST API."""
         api_key = self.get_api_key()
         if not api_key:
+            logger.error("REST fallback: GEMINI_API_KEY not set")
             return None
+
+        # Auto-detect MIME type from file header
+        mime_type = "audio/mpeg"  # default
+        if audio_bytes[:4] == b'\x00\x00\x00\x20' or audio_bytes[4:8] == b'ftyp':
+            mime_type = "audio/mp4"
+        elif audio_bytes[:3] == b'ID3' or (audio_bytes[0:2] == b'\xff\xfb'):
+            mime_type = "audio/mpeg"
+        elif audio_bytes[:4] == b'RIFF':
+            mime_type = "audio/wav"
+        elif audio_bytes[:4] == b'OggS':
+            mime_type = "audio/ogg"
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
         b64_audio = base64.b64encode(audio_bytes).decode("utf-8")
+
+        logger.info("REST fallback: sending %d bytes as %s to Gemini", len(audio_bytes), mime_type)
 
         payload = {
             "contents": [
@@ -202,7 +216,7 @@ class GeminiTranscriptionService:
                         },
                         {
                             "inlineData": {
-                                "mimeType": "audio/mp3",
+                                "mimeType": mime_type,
                                 "data": b64_audio
                             }
                         }
@@ -215,7 +229,7 @@ class GeminiTranscriptionService:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=45.0) as client:
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 res = await client.post(url, json=payload)
                 if res.status_code == 200:
                     data = res.json()
@@ -226,7 +240,9 @@ class GeminiTranscriptionService:
                             text_out = parts[0]["text"].strip()
                             logger.info("Gemini REST fallback transcription succeeded (%d chars)", len(text_out))
                             return text_out
-                logger.warning("Gemini REST fallback failed with status %d: %s", res.status_code, res.text[:120])
+                    logger.warning("Gemini REST fallback returned no candidates: %s", str(data)[:200])
+                else:
+                    logger.warning("Gemini REST fallback failed with status %d: %s", res.status_code, res.text[:300])
         except Exception as ex:
             logger.error("Gemini REST fallback error: %s", ex)
 
@@ -238,42 +254,63 @@ class GeminiTranscriptionService:
         force: bool = False,
     ) -> Optional[str]:
         """Fetch recording audio from R2, transcribe using Gemini 3.5 Live STT, and persist to database."""
-        rec = await telephony_db.get_recording(recording_id)
-        if not rec:
-            logger.warning("Recording %s not found in database", recording_id)
-            return None
+        try:
+            rec = await telephony_db.get_recording(recording_id)
+            if not rec:
+                logger.warning("Recording %s not found in database", recording_id)
+                return None
 
-        if rec.get("transcription") and not force:
-            logger.debug("Recording %s already has transcription", recording_id)
-            return rec.get("transcription")
+            if rec.get("transcription") and not force:
+                logger.debug("Recording %s already has transcription", recording_id)
+                return rec.get("transcription")
 
-        # Mark status as transcribing
-        await telephony_db.update_recording_transcription(recording_id, "", status="transcribing")
+            # Mark status as transcribing
+            await telephony_db.update_recording_transcription(recording_id, "", status="transcribing")
 
-        # Get audio bytes from R2
-        object_key = rec.get("storage_object_key")
-        audio_bytes = None
-        if object_key and storage_r2.is_configured():
-            if await storage_r2.object_exists(object_key):
-                audio_bytes = await storage_r2.get_object_bytes(object_key)
-            elif not object_key.endswith(".mp3"):
-                mp3_key = f"{object_key}.mp3"
-                if await storage_r2.object_exists(mp3_key):
-                    audio_bytes = await storage_r2.get_object_bytes(mp3_key)
+            # Get audio bytes from R2
+            object_key = rec.get("storage_object_key")
+            audio_bytes = None
+            if object_key and storage_r2.is_configured():
+                try:
+                    if await storage_r2.object_exists(object_key):
+                        audio_bytes = await storage_r2.get_object_bytes(object_key)
+                    elif not object_key.endswith(".mp3"):
+                        mp3_key = f"{object_key}.mp3"
+                        if await storage_r2.object_exists(mp3_key):
+                            audio_bytes = await storage_r2.get_object_bytes(mp3_key)
+                except Exception as r2_err:
+                    logger.error("R2 fetch error for recording %s: %s", recording_id, r2_err)
 
-        if not audio_bytes:
-            logger.error("No audio bytes available in R2 for recording %s (key: %s)", recording_id, object_key)
-            await telephony_db.update_recording_transcription(recording_id, "", status="failed")
-            return None
+            if not audio_bytes:
+                logger.error("No audio bytes available in R2 for recording %s (key: %s)", recording_id, object_key)
+                await telephony_db.update_recording_transcription(recording_id, "", status="failed")
+                return None
 
-        transcript = await self.transcribe_audio_bytes(audio_bytes, mode="SMART")
-        if transcript:
-            await telephony_db.update_recording_transcription(recording_id, transcript, status="completed")
-            logger.info("Saved transcription for recording %s", recording_id)
-            return transcript
-        else:
-            await telephony_db.update_recording_transcription(recording_id, "", status="failed")
-            logger.warning("Transcription generation failed for recording %s", recording_id)
+            logger.info("Fetched %d bytes from R2 for recording %s, starting transcription...", len(audio_bytes), recording_id)
+
+            # Try REST fallback first (more reliable than WebSocket for recorded audio)
+            transcript = await self._transcribe_via_rest_fallback(audio_bytes)
+
+            # If REST failed, try WebSocket streaming
+            if not transcript:
+                logger.info("REST fallback returned no result for %s, trying WebSocket streaming...", recording_id)
+                transcript = await self.transcribe_audio_bytes(audio_bytes, mode="SMART")
+
+            if transcript:
+                await telephony_db.update_recording_transcription(recording_id, transcript, status="completed")
+                logger.info("Saved transcription for recording %s (%d chars)", recording_id, len(transcript))
+                return transcript
+            else:
+                await telephony_db.update_recording_transcription(recording_id, "", status="failed")
+                logger.warning("Transcription generation failed for recording %s", recording_id)
+                return None
+
+        except Exception as e:
+            logger.exception("Unhandled error in transcribe_recording for %s: %s", recording_id, e)
+            try:
+                await telephony_db.update_recording_transcription(recording_id, "", status="failed")
+            except Exception:
+                logger.exception("Failed to update status to 'failed' for recording %s", recording_id)
             return None
 
 

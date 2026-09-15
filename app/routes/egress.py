@@ -436,7 +436,19 @@ async def trigger_recording_transcription(recording_id: str):
         raise HTTPException(status_code=404, detail="Recording not found")
 
     await telephony_db.update_recording_transcription(recording_id, "", status="transcribing")
-    asyncio.create_task(gemini_transcribe.transcribe_recording(recording_id, force=True))
+
+    def _task_done(task: asyncio.Task):
+        if task.exception():
+            logger.error(
+                "Background transcription task for %s crashed: %s",
+                recording_id, task.exception(),
+            )
+
+    task = asyncio.create_task(
+        gemini_transcribe.transcribe_recording(recording_id, force=True),
+        name=f"transcribe-{recording_id}",
+    )
+    task.add_done_callback(_task_done)
 
     return {
         "status": "queued",
