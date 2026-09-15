@@ -112,10 +112,10 @@ def extract_call_numbers(room_name: str, is_inbound: bool) -> Tuple[str, str, st
                     callee = phone
                 break
 
-    if not caller and is_inbound:
-        caller = "Inbound Caller"
+    if not caller:
+        caller = "Inbound Caller" if is_inbound else did
     if not callee:
-        callee = did
+        callee = did if is_inbound else "Outbound Recipient"
 
     return caller, callee, did
 
@@ -143,6 +143,16 @@ async def auto_start_room_recording(room_name: str, lk: LiveKitClient) -> Option
     # Extract caller and callee contact numbers
     caller, callee, did = extract_call_numbers(room_name, is_inbound)
 
+    # Resolve tenant ID (Default to ADMIN for admin DID +918065355408 or unassigned)
+    tenant_id = "ADMIN"
+    if did and did != "+918065355408":
+        try:
+            routing = await telephony_db.get_did_routing(did)
+            if routing and routing.get("tenant_id"):
+                tenant_id = routing.get("tenant_id")
+        except Exception:
+            tenant_id = "ADMIN"
+
     # 1. Create recording record in PostgreSQL
     await telephony_db.create_recording(
         recording_id=rec_id,
@@ -151,13 +161,13 @@ async def auto_start_room_recording(room_name: str, lk: LiveKitClient) -> Option
         caller_number=caller,
         callee_number=callee,
         did_number=did,
-        tenant_id="wasid-hq",
+        tenant_id=tenant_id,
         agent_id="wasid-ai-automation-master",
         status="recording",
         storage_bucket=storage_r2.bucket,
         storage_object_key=object_key,
     )
-    logger.info("Created call recording record %s for room %s", rec_id, room_name)
+    logger.info("Created call recording record %s for room %s (tenant: %s)", rec_id, room_name, tenant_id)
 
     # 2. Trigger LiveKit Egress recording
     try:
@@ -202,6 +212,15 @@ async def _background_convert_mp3(recording_id: str, file_key: str):
             logger.info("Auto-converted recording %s to MP3 in R2: %s", recording_id, mp3_key)
     except Exception as e:
         logger.warning("Background MP3 conversion failed for %s: %s", recording_id, e)
+
+
+async def _background_transcribe(recording_id: str):
+    """Background task to transcribe completed call recording using Gemini 3.5 Transcribe Live STT."""
+    try:
+        from app.services.transcribe_gemini import gemini_transcribe
+        await gemini_transcribe.transcribe_recording(recording_id)
+    except Exception as e:
+        logger.warning("Background transcription failed for %s: %s", recording_id, e)
 
 
 async def process_verified_event(event) -> Response:
@@ -259,6 +278,7 @@ async def process_verified_event(event) -> Response:
                             rec_id, egress_id, status_str, duration_secs, file_size)
                 if status_str == "completed" and file_key:
                     asyncio.create_task(_background_convert_mp3(rec_id, file_key))
+                    asyncio.create_task(_background_transcribe(rec_id))
 
     return Response(status_code=200, content="OK")
 
@@ -314,5 +334,6 @@ async def process_raw_webhook(data: dict) -> Response:
             )
             if status_str == "completed" and file_key:
                 asyncio.create_task(_background_convert_mp3(rec_id, file_key))
+                asyncio.create_task(_background_transcribe(rec_id))
 
     return Response(status_code=200, content="OK (raw)")

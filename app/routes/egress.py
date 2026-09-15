@@ -4,8 +4,8 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 
 from app.security.basic_auth import get_current_user, requires_admin
 from app.security.csrf import get_csrf_token, verify_csrf_token
@@ -24,6 +24,8 @@ async def egress_index(
     partial: Optional[str] = None,
     direction: Optional[str] = None,
     status: Optional[str] = None,
+    tenant: Optional[str] = None,
+    did: Optional[str] = None,
     search: Optional[str] = None,
     page: int = 1,
     limit: int = 30,
@@ -36,6 +38,14 @@ async def egress_index(
         logger.debug("Failed to list active egress jobs from LiveKit API: %s", e)
         active_egress_jobs = []
 
+    distinct_tenants = []
+    distinct_dids = []
+    try:
+        distinct_tenants = await telephony_db.get_distinct_tenants()
+        distinct_dids = await telephony_db.get_distinct_dids()
+    except Exception as e:
+        logger.warning("Failed to fetch distinct tenants/dids: %s", e)
+
     # Query persistent recordings database
     try:
         stats = await telephony_db.get_recording_stats()
@@ -43,6 +53,8 @@ async def egress_index(
         recordings = await telephony_db.list_recordings(
             direction=direction,
             status=status,
+            tenant_id=tenant,
+            did=did,
             search=search,
             limit=limit,
             offset=offset,
@@ -70,6 +82,10 @@ async def egress_index(
         "csrf_token": get_csrf_token(request),
         "selected_direction": direction or "all",
         "selected_status": status or "all",
+        "selected_tenant": tenant or "all",
+        "selected_did": did or "all",
+        "distinct_tenants": distinct_tenants,
+        "distinct_dids": distinct_dids,
         "search_query": search or "",
         "page": page,
         "limit": limit,
@@ -294,3 +310,136 @@ async def stop_egress(
         logger.warning("Error stopping egress: %s", e)
 
     return RedirectResponse(url="/egress", status_code=303)
+
+
+@router.get("/api/v1/transcriptions")
+async def get_transcriptions_api(
+    tenant_id: Optional[str] = Query(None, description="Filter by tenant ID (e.g. ADMIN)"),
+    did_number: Optional[str] = Query(None, description="Filter by DID number (+918065355408)"),
+    phone_number: Optional[str] = Query(None, description="Filter by caller or recipient phone number"),
+    date: Optional[str] = Query(None, description="Filter by date string (YYYY-MM-DD)"),
+    recording_id: Optional[str] = Query(None, description="Filter by specific recording ID"),
+    format: Optional[str] = Query("json", description="Output format: json or text"),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """
+    Dedicated Querying API to retrieve call transcriptions.
+    Filtered by tenant ID, DID number, caller/callee phone number, date, or recording ID.
+    Used for downstream AI summarization, CRM synchronization, and data extraction.
+    """
+    try:
+        results = await telephony_db.query_transcriptions(
+            tenant_id=tenant_id,
+            did_number=did_number,
+            phone_number=phone_number,
+            date_str=date,
+            recording_id=recording_id,
+            limit=limit,
+        )
+        if format and format.lower() == "text":
+            lines = []
+            for r in results:
+                lines.append(f"[{r.get('started_at')}] [{r.get('direction', '').upper()}] Tenant: {r.get('tenant_id')} | Caller: {r.get('caller_number')} | Receiver: {r.get('callee_number') or r.get('did_number')}")
+                lines.append(f"Transcript: {r.get('transcription')}\n")
+            return PlainTextResponse(content="\n".join(lines))
+
+        return {
+            "status": "success",
+            "count": len(results),
+            "filters": {
+                "tenant_id": tenant_id,
+                "did_number": did_number,
+                "phone_number": phone_number,
+                "date": date,
+                "recording_id": recording_id,
+            },
+            "transcriptions": results,
+        }
+    except Exception as e:
+        logger.error("Error in query transcriptions API: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to query transcriptions: {e}")
+
+
+@router.get("/egress/{recording_id}/transcript", dependencies=[Depends(requires_admin)])
+async def get_recording_transcript(recording_id: str):
+    """Get the AI transcription text and status for a recording (for modal inspection)."""
+    rec = await telephony_db.get_recording(recording_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    return {
+        "recording_id": recording_id,
+        "tenant_id": rec.get("tenant_id") or "ADMIN",
+        "caller_number": rec.get("caller_number"),
+        "callee_number": rec.get("callee_number") or rec.get("did_number"),
+        "direction": rec.get("direction"),
+        "duration_seconds": rec.get("duration_seconds"),
+        "started_at": rec.get("started_at"),
+        "transcription": rec.get("transcription"),
+        "transcription_status": rec.get("transcription_status") or ("completed" if rec.get("transcription") else "pending"),
+    }
+
+
+@router.get("/egress/{recording_id}/transcript/download", dependencies=[Depends(requires_admin)])
+async def download_recording_transcript(recording_id: str):
+    """Download plain text file of the AI call transcription."""
+    rec = await telephony_db.get_recording(recording_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    transcript_text = rec.get("transcription") or "No transcription available."
+    direction = (rec.get("direction") or "call").upper()
+    tenant = rec.get("tenant_id") or "ADMIN"
+    caller = rec.get("caller_number") or "Unknown"
+    callee = rec.get("callee_number") or rec.get("did_number") or "+918065355408"
+    duration = rec.get("duration_seconds", 0)
+    mins = duration // 60
+    secs = duration % 60
+    started = rec.get("started_at", "N/A")
+
+    content = f"""================================================================================
+WASID AI TELEPHONY CALL TRANSCRIPTION REPORT
+================================================================================
+Recording ID   : {recording_id}
+Date & Time    : {started}
+Call Direction : {direction}
+Tenant ID      : {tenant}
+Caller (From)  : {caller}
+Receiver (To)  : {callee}
+DID Number     : {rec.get('did_number') or '+918065355408'}
+Duration       : {mins}m {secs:02d}s
+AI Engine      : Google Gemini 3.5 Transcribe Live (SMART Mode)
+================================================================================
+
+TRANSCRIPT:
+--------------------------------------------------------------------------------
+{transcript_text}
+--------------------------------------------------------------------------------
+Generated by WASID AI Telephony Platform
+================================================================================
+"""
+    filename = f"transcript_{tenant}_{direction.lower()}_{recording_id[:12]}.txt"
+    return Response(
+        content=content,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+@router.post("/egress/{recording_id}/transcribe", dependencies=[Depends(requires_admin)])
+async def trigger_recording_transcription(recording_id: str):
+    """On-demand trigger for Gemini 3.5 Live transcription."""
+    from app.services.transcribe_gemini import gemini_transcribe
+    rec = await telephony_db.get_recording(recording_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    text = await gemini_transcribe.transcribe_recording(recording_id, force=True)
+    if not text:
+        raise HTTPException(status_code=500, detail="Failed to generate transcript with Gemini Live STT")
+
+    return {
+        "status": "success",
+        "recording_id": recording_id,
+        "transcription": text,
+    }

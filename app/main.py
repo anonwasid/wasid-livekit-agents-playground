@@ -3,6 +3,7 @@ LiveKit Dashboard - Main Application
 Stateless SSR dashboard for LiveKit server management
 """
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -58,9 +59,28 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️ Failed to start Recording Supervisor: {e}")
 
+    # Start Automated 30-Day Retention Pruning Loop
+    prune_task = None
+    async def _retention_pruning_loop():
+        await asyncio.sleep(10)  # Wait 10s after startup
+        while True:
+            try:
+                from app.services.db import telephony_db
+                res = await telephony_db.prune_expired_recordings(days=30)
+                if res.get("deleted_count", 0) > 0:
+                    print(f"🧹 Automated Retention Pruned: {res['deleted_count']} recording(s) older than 30 days ({res['freed_bytes']} bytes freed from R2 and DB)")
+            except Exception as e:
+                print(f"⚠️ Retention pruning error: {e}")
+            await asyncio.sleep(6 * 3600)  # Check every 6 hours
+
+    prune_task = asyncio.create_task(_retention_pruning_loop())
+    print("✅ Automated 1-Month Call Recording Retention policy initialized (runs every 6h)")
+
     yield
 
     # Shutdown
+    if prune_task:
+        prune_task.cancel()
     try:
         from app.services.recording_supervisor import stop_recording_supervisor
         stop_recording_supervisor()
@@ -91,6 +111,8 @@ async def auth_guard_middleware(request: Request, call_next):
     - /health
     - /static/*
     - /favicon.ico
+    - /api/webhooks/*
+    - /api/v1/transcriptions
     """
     path = request.url.path
 
@@ -99,6 +121,7 @@ async def auth_guard_middleware(request: Request, call_next):
         path in ("/login", "/logout", "/health", "/favicon.ico")
         or path.startswith("/static/")
         or path.startswith("/api/webhooks/")
+        or path.startswith("/api/v1/transcriptions")
     ):
         return await call_next(request)
 

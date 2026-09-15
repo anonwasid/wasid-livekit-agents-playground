@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import (
@@ -25,6 +25,7 @@ from sqlalchemy import (
     func,
     desc,
     or_,
+    text,
 )
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -142,6 +143,8 @@ class CallRecordingRecord(Base):
     ended_at = Column(DateTime(timezone=True), nullable=True)
     error_message = Column(Text, nullable=True)
     metadata_json = Column(Text, nullable=False, default="{}")
+    transcription = Column(Text, nullable=True)
+    transcription_status = Column(String(32), nullable=False, default="pending")  # pending, transcribing, completed, failed
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -167,6 +170,8 @@ class CallRecordingRecord(Base):
             "ended_at": self.ended_at.isoformat() if self.ended_at else None,
             "error_message": self.error_message,
             "metadata_json": self.metadata_json,
+            "transcription": self.transcription,
+            "transcription_status": self.transcription_status or "pending",
         }
 
 
@@ -239,8 +244,24 @@ class TelephonyDatabase:
             return
 
         engine = self.get_engine()
+        db_url = self.get_database_url()
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            if "postgresql" in db_url:
+                try:
+                    await conn.execute(text("ALTER TABLE call_recordings ADD COLUMN IF NOT EXISTS transcription TEXT;"))
+                    await conn.execute(text("ALTER TABLE call_recordings ADD COLUMN IF NOT EXISTS transcription_status VARCHAR(32) DEFAULT 'pending';"))
+                except Exception as ex:
+                    logger.debug("PostgreSQL column migration notice: %s", ex)
+            else:
+                try:
+                    await conn.execute(text("ALTER TABLE call_recordings ADD COLUMN transcription TEXT;"))
+                except Exception:
+                    pass
+                try:
+                    await conn.execute(text("ALTER TABLE call_recordings ADD COLUMN transcription_status VARCHAR(32) DEFAULT 'pending';"))
+                except Exception:
+                    pass
 
         # Purge legacy mock/synthetic seed records from database
         sessionmaker = self.get_sessionmaker()
@@ -254,26 +275,42 @@ class TelephonyDatabase:
                         await session.delete(row)
                         del existing[did]
 
-                # Backfill historical recordings where caller_number was not parsed correctly
+                # Backfill historical recordings: Tenant ID and dual-sided contact numbers
                 recs_res = await session.execute(select(CallRecordingRecord))
                 for rec in recs_res.scalars():
                     rname = rec.room_name or ""
                     is_inbound = rec.direction == "inbound"
                     match = re.search(r'(?:sip-in|call-out|sip-out)[-_]+(?:\+)?(\d{10,15})', rname)
-                    if match:
-                        phone = f"+{match.group(1)}"
-                        if is_inbound and (not rec.caller_number or rec.caller_number == "Inbound Caller"):
+                    phone = f"+{match.group(1)}" if match else ""
+
+                    # 1. Tenant ID attribution: for admin DID or missing tenant, attribute to ADMIN
+                    if not rec.tenant_id or rec.tenant_id in ("wasid-hq", "default", "None", "") or rec.did_number == "+918065355408":
+                        rec.tenant_id = "ADMIN"
+
+                    # 2. Contact numbers: Inbound vs Outbound
+                    if is_inbound:
+                        # Inbound Call:
+                        # Caller (From) = Customer Phone Number
+                        # Receiver (To) = DID Number (+918065355408)
+                        if phone and phone != "+918065355408":
                             rec.caller_number = phone
-                            if not rec.callee_number:
-                                rec.callee_number = "+918065355408"
-                            if not rec.did_number:
-                                rec.did_number = "+918065355408"
-                        elif not is_inbound and (not rec.callee_number or rec.callee_number == rec.caller_number):
+                        elif not rec.caller_number or rec.caller_number in ("Inbound Caller", "+918065355408"):
+                            rec.caller_number = phone or "+918009128306"
+                        rec.callee_number = "+918065355408"
+                        rec.did_number = "+918065355408"
+                    else:
+                        # Outbound Call:
+                        # Caller (From) = DID Number (+918065355408)
+                        # Receiver (To) = Customer Destination Phone Number
+                        rec.caller_number = "+918065355408"
+                        rec.did_number = "+918065355408"
+                        if phone and phone != "+918065355408":
                             rec.callee_number = phone
-                            if not rec.caller_number:
-                                rec.caller_number = "+918065355408"
-                            if not rec.did_number:
-                                rec.did_number = "+918065355408"
+                        elif not rec.callee_number or rec.callee_number in ("+918065355408", "Inbound Caller"):
+                            rec.callee_number = phone or "+919876543210"
+
+                    if not rec.transcription_status:
+                        rec.transcription_status = "pending"
 
         self._initialized = True
         logger.info(
@@ -562,6 +599,8 @@ class TelephonyDatabase:
         direction: Optional[str] = None,
         status: Optional[str] = None,
         search: Optional[str] = None,
+        tenant_id: Optional[str] = None,
+        did: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> List[Dict[str, Any]]:
@@ -574,6 +613,26 @@ class TelephonyDatabase:
                 stmt = stmt.where(CallRecordingRecord.direction == direction.lower())
             if status and status.lower() != "all":
                 stmt = stmt.where(CallRecordingRecord.status == status.lower())
+            if tenant_id and tenant_id.lower() != "all":
+                if tenant_id.upper() == "ADMIN":
+                    stmt = stmt.where(
+                        or_(
+                            CallRecordingRecord.tenant_id == "ADMIN",
+                            CallRecordingRecord.tenant_id == "wasid-hq",
+                            CallRecordingRecord.did_number == "+918065355408",
+                        )
+                    )
+                else:
+                    stmt = stmt.where(CallRecordingRecord.tenant_id.ilike(f"%{tenant_id.strip()}%"))
+            if did and did.lower() != "all":
+                did_clean = did.strip().replace(" ", "")
+                stmt = stmt.where(
+                    or_(
+                        CallRecordingRecord.did_number.ilike(f"%{did_clean}%"),
+                        CallRecordingRecord.caller_number.ilike(f"%{did_clean}%"),
+                        CallRecordingRecord.callee_number.ilike(f"%{did_clean}%"),
+                    )
+                )
             if search:
                 pattern = f"%{search.strip()}%"
                 stmt = stmt.where(
@@ -581,14 +640,161 @@ class TelephonyDatabase:
                         CallRecordingRecord.caller_number.ilike(pattern),
                         CallRecordingRecord.callee_number.ilike(pattern),
                         CallRecordingRecord.did_number.ilike(pattern),
+                        CallRecordingRecord.tenant_id.ilike(pattern),
                         CallRecordingRecord.room_name.ilike(pattern),
                         CallRecordingRecord.recording_id.ilike(pattern),
                         CallRecordingRecord.egress_id.ilike(pattern),
+                        CallRecordingRecord.transcription.ilike(pattern),
                     )
                 )
             stmt = stmt.order_by(CallRecordingRecord.started_at.desc()).limit(limit).offset(offset)
             result = await session.execute(stmt)
             return [row.to_dict() for row in result.scalars()]
+
+    async def get_distinct_tenants(self) -> List[str]:
+        """Get unique tenant IDs from recordings and routings."""
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            stmt = select(CallRecordingRecord.tenant_id).where(CallRecordingRecord.status != "deleted").distinct()
+            res = await session.execute(stmt)
+            tenants = set(r for r in res.scalars() if r)
+            tenants.add("ADMIN")
+            return sorted(list(tenants))
+
+    async def get_distinct_dids(self) -> List[str]:
+        """Get unique DID numbers from recordings and routings."""
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            stmt = select(CallRecordingRecord.did_number).where(CallRecordingRecord.status != "deleted").distinct()
+            res = await session.execute(stmt)
+            dids = set(r for r in res.scalars() if r)
+            dids.add("+918065355408")
+            return sorted(list(dids))
+
+    async def update_recording_transcription(
+        self,
+        recording_id: str,
+        transcription: str,
+        status: str = "completed",
+    ) -> bool:
+        """Update transcription text and status for a recording."""
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            async with session.begin():
+                stmt = select(CallRecordingRecord).where(CallRecordingRecord.recording_id == recording_id)
+                res = await session.execute(stmt)
+                rec = res.scalars().first()
+                if not rec:
+                    return False
+                rec.transcription = transcription
+                rec.transcription_status = status
+                await session.flush()
+                return True
+
+    async def query_transcriptions(
+        self,
+        tenant_id: Optional[str] = None,
+        did_number: Optional[str] = None,
+        phone_number: Optional[str] = None,
+        started_after: Optional[datetime] = None,
+        started_before: Optional[datetime] = None,
+        date_str: Optional[str] = None,
+        recording_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Query transcripts by tenant ID, DID, phone, timestamps, or recording ID."""
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            stmt = select(CallRecordingRecord).where(
+                CallRecordingRecord.status != "deleted",
+                CallRecordingRecord.transcription.isnot(None),
+            )
+            if recording_id:
+                stmt = stmt.where(CallRecordingRecord.recording_id == recording_id)
+            if tenant_id and tenant_id.lower() != "all":
+                if tenant_id.upper() == "ADMIN":
+                    stmt = stmt.where(
+                        or_(
+                            CallRecordingRecord.tenant_id == "ADMIN",
+                            CallRecordingRecord.tenant_id == "wasid-hq",
+                            CallRecordingRecord.did_number == "+918065355408",
+                        )
+                    )
+                else:
+                    stmt = stmt.where(CallRecordingRecord.tenant_id.ilike(f"%{tenant_id}%"))
+            if did_number and did_number.lower() != "all":
+                clean_did = did_number.strip().replace(" ", "")
+                stmt = stmt.where(
+                    or_(
+                        CallRecordingRecord.did_number.ilike(f"%{clean_did}%"),
+                        CallRecordingRecord.caller_number.ilike(f"%{clean_did}%"),
+                        CallRecordingRecord.callee_number.ilike(f"%{clean_did}%"),
+                    )
+                )
+            if phone_number:
+                clean_phone = phone_number.strip().replace(" ", "")
+                stmt = stmt.where(
+                    or_(
+                        CallRecordingRecord.caller_number.ilike(f"%{clean_phone}%"),
+                        CallRecordingRecord.callee_number.ilike(f"%{clean_phone}%"),
+                    )
+                )
+            if started_after:
+                stmt = stmt.where(CallRecordingRecord.started_at >= started_after)
+            if started_before:
+                stmt = stmt.where(CallRecordingRecord.started_at <= started_before)
+            if date_str:
+                pattern = f"%{date_str.strip()}%"
+                stmt = stmt.where(
+                    or_(
+                        func.to_char(CallRecordingRecord.started_at, 'YYYY-MM-DD').ilike(pattern),
+                        CallRecordingRecord.room_name.ilike(pattern),
+                    )
+                )
+
+            stmt = stmt.order_by(CallRecordingRecord.started_at.desc()).limit(limit)
+            res = await session.execute(stmt)
+            return [row.to_dict() for row in res.scalars()]
+
+    async def prune_expired_recordings(self, days: int = 30) -> Dict[str, Any]:
+        """Automatically delete recordings older than 30 days from database and Cloudflare R2."""
+        from app.services.storage_r2 import storage_r2
+        await self.init_db()
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        deleted_count = 0
+        freed_bytes = 0
+
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            stmt = select(CallRecordingRecord).where(
+                CallRecordingRecord.started_at < cutoff,
+                CallRecordingRecord.status != "deleted",
+            )
+            res = await session.execute(stmt)
+            expired_recs = res.scalars().all()
+
+            for rec in expired_recs:
+                obj_key = rec.storage_object_key
+                if obj_key and storage_r2.is_configured():
+                    try:
+                        await storage_r2.delete_object(obj_key)
+                        await storage_r2.delete_object(f"{obj_key}.mp3")
+                    except Exception as e:
+                        logger.warning("Error deleting R2 object %s during prune: %s", obj_key, e)
+
+                freed_bytes += rec.file_size_bytes or 0
+                rec.status = "deleted"
+                deleted_count += 1
+
+            if deleted_count > 0:
+                await session.commit()
+                logger.info("Pruned %d expired recordings (>%d days old), freed %d bytes", deleted_count, days, freed_bytes)
+
+        return {"deleted_count": deleted_count, "freed_bytes": freed_bytes}
 
     async def delete_recording(self, recording_id: str, hard: bool = False) -> bool:
         """Mark a recording as deleted or permanently remove it."""

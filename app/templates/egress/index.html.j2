@@ -116,15 +116,15 @@
 <!-- Filter Toolbar -->
 <div class="card mb-4">
     <div class="card-body py-3">
-        <form method="get" action="/egress" class="row g-2 g-md-3 align-items-center">
-            <div class="col-12 col-sm-6 col-lg-3">
+        <form method="get" action="/egress" class="row g-2 align-items-center">
+            <div class="col-12 col-md-3 col-xl-2">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
                     <input type="text" name="search" class="form-control" placeholder="Search phone, room, ID..." value="{{ search_query }}">
                 </div>
             </div>
 
-            <div class="col-6 col-sm-6 col-lg-3">
+            <div class="col-6 col-md-2 col-xl-2">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text"><i class="bi bi-arrows-expand"></i></span>
                     <select name="direction" class="form-select" onchange="this.form.submit()">
@@ -135,7 +135,7 @@
                 </div>
             </div>
 
-            <div class="col-6 col-sm-6 col-lg-3">
+            <div class="col-6 col-md-2 col-xl-2">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text"><i class="bi bi-funnel"></i></span>
                     <select name="status" class="form-select" onchange="this.form.submit()">
@@ -147,17 +147,41 @@
                 </div>
             </div>
 
-            <div class="col-12 col-sm-6 col-lg-3 d-flex gap-2 justify-content-between justify-content-lg-end flex-wrap">
+            <div class="col-6 col-md-2 col-xl-2">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-building"></i></span>
+                    <select name="tenant" class="form-select" onchange="this.form.submit()">
+                        <option value="all" {% if selected_tenant == 'all' %}selected{% endif %}>All Tenants</option>
+                        {% for t in distinct_tenants %}
+                        <option value="{{ t }}" {% if selected_tenant == t %}selected{% endif %}>{{ t }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="col-6 col-md-3 col-xl-2">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-hash"></i></span>
+                    <select name="did" class="form-select" onchange="this.form.submit()">
+                        <option value="all" {% if selected_did == 'all' %}selected{% endif %}>All DIDs</option>
+                        {% for d in distinct_dids %}
+                        <option value="{{ d }}" {% if selected_did == d %}selected{% endif %}>{{ d }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="col-12 col-xl-2 d-flex gap-2 justify-content-between justify-content-xl-end flex-wrap">
                 <div class="d-flex gap-2">
-                    <button type="submit" class="btn btn-secondary btn-sm">
+                    <button type="submit" class="btn btn-secondary btn-sm" title="Apply Filter">
                         <i class="bi bi-filter"></i> Apply
                     </button>
                     <a href="/egress" class="btn btn-outline-secondary btn-sm" title="Clear Filters">
-                        <i class="bi bi-x-circle"></i> Reset
+                        <i class="bi bi-x-circle"></i>
                     </a>
                 </div>
                 <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#startEgressModal">
-                    <i class="bi bi-plus-circle"></i> Start Egress
+                    <i class="bi bi-plus-circle"></i> Egress
                 </button>
             </div>
         </form>
@@ -178,14 +202,15 @@
             <table class="table align-middle mb-0">
                 <thead>
                     <tr>
+                        <th>Tenant</th>
                         <th>Direction</th>
                         <th>Caller (From)</th>
-                        <th>Receiver / DID (To)</th>
+                        <th>Receiver (To)</th>
                         <th>Agent / Room</th>
                         <th>Status</th>
                         <th>Duration</th>
-                        <th>Size</th>
                         <th>Recording Player</th>
+                        <th>AI Transcript</th>
                         <th>Started</th>
                         <th class="text-end">Actions</th>
                     </tr>
@@ -193,6 +218,13 @@
                 <tbody id="recordings-table-body">
                     {% for rec in recordings %}
                     <tr>
+                        <td>
+                            {% if rec.tenant_id == 'ADMIN' or not rec.tenant_id %}
+                            <span class="badge" style="background-color: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-weight: 600;">ADMIN</span>
+                            {% else %}
+                            <span class="badge" style="background-color: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 600;">{{ rec.tenant_id }}</span>
+                            {% endif %}
+                        </td>
                         <td>
                             {% if rec.direction == 'inbound' %}
                             <span class="badge badge-inbound"><i class="bi bi-arrow-down-left"></i> Inbound</span>
@@ -202,17 +234,25 @@
                         </td>
                         <td>
                             <div class="d-flex align-items-center gap-1">
-                                <i class="bi bi-person-fill text-primary" style="font-size: 0.85rem;"></i>
+                                <i class="bi bi-telephone-outbound text-primary" style="font-size: 0.85rem;"></i>
                                 <span class="font-monospace fw-semibold" style="color: var(--text-primary); font-size: 0.85rem;">
-                                    {{ rec.caller_number or 'Inbound Caller' }}
+                                    {% if rec.direction == 'inbound' %}
+                                        {{ rec.caller_number or 'Inbound Caller' }}
+                                    {% else %}
+                                        {{ rec.caller_number or rec.did_number or '+918065355408' }}
+                                    {% endif %}
                                 </span>
                             </div>
                         </td>
                         <td>
                             <div class="d-flex align-items-center gap-1">
-                                <i class="bi bi-telephone-fill text-info" style="font-size: 0.85rem;"></i>
+                                <i class="bi bi-telephone-inbound text-info" style="font-size: 0.85rem;"></i>
                                 <span class="font-monospace text-muted" style="font-size: 0.85rem;">
-                                    {{ rec.callee_number or rec.did_number or '+918065355408' }}
+                                    {% if rec.direction == 'inbound' %}
+                                        {{ rec.callee_number or rec.did_number or '+918065355408' }}
+                                    {% else %}
+                                        {{ rec.callee_number or 'Outbound Recipient' }}
+                                    {% endif %}
                                 </span>
                             </div>
                         </td>
@@ -238,13 +278,6 @@
                             <span style="font-weight: 500;">
                                 {{ (rec.duration_seconds // 60) }}:{{ "%02d"|format(rec.duration_seconds % 60) }}
                             </span>
-                            {% else %}
-                            <span class="text-muted">-</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if rec.file_size_bytes > 0 %}
-                            <small class="text-muted">{{ (rec.file_size_bytes / 1024) | round(0) }} KB</small>
                             {% else %}
                             <span class="text-muted">-</span>
                             {% endif %}
@@ -280,6 +313,48 @@
                             <small class="text-danger"><i class="bi bi-broadcast"></i> Live in progress...</small>
                             {% else %}
                             <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if rec.transcription %}
+                            <div class="d-flex align-items-center gap-1">
+                                <button type="button" 
+                                        class="btn btn-sm btn-outline-info view-transcript-btn d-flex align-items-center gap-1 py-0 px-2"
+                                        style="height: 28px; font-size: 0.78rem;"
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#transcriptModal"
+                                        data-recording-id="{{ rec.recording_id }}"
+                                        data-tenant="{{ rec.tenant_id or 'ADMIN' }}"
+                                        data-caller="{% if rec.direction == 'inbound' %}{{ rec.caller_number or 'Inbound Caller' }}{% else %}{{ rec.caller_number or rec.did_number or '+918065355408' }}{% endif %}"
+                                        data-callee="{% if rec.direction == 'inbound' %}{{ rec.callee_number or rec.did_number or '+918065355408' }}{% else %}{{ rec.callee_number or 'Outbound Recipient' }}{% endif %}"
+                                        data-direction="{{ (rec.direction or 'call') | upper }}"
+                                        data-started="{{ rec.started_at[:19].replace('T', ' ') if rec.started_at else '-' }}"
+                                        data-duration="{% if rec.duration_seconds > 0 %}{{ (rec.duration_seconds // 60) }}:{{ '%02d'|format(rec.duration_seconds % 60) }}{% else %}0:00{% endif %}"
+                                        data-transcript="{{ rec.transcription | e }}"
+                                        title="View Gemini AI Transcript">
+                                    <i class="bi bi-file-earmark-text"></i> View
+                                </button>
+                                <a href="/egress/{{ rec.recording_id }}/transcript/download" 
+                                   class="btn btn-sm btn-outline-secondary py-0 px-2" 
+                                   style="height: 28px; font-size: 0.78rem;"
+                                   title="Download Transcript as Text File (.txt)">
+                                    <i class="bi bi-download"></i> .txt
+                                </a>
+                            </div>
+                            {% elif rec.transcription_status == 'transcribing' %}
+                            <span class="badge bg-warning-subtle text-warning border border-warning d-inline-flex align-items-center gap-1" style="font-size: 0.75rem;">
+                                <span class="spinner-border spinner-border-sm" style="width: 0.7rem; height: 0.7rem;"></span> Transcribing...
+                            </span>
+                            {% elif rec.status == 'completed' %}
+                            <button type="button" 
+                                    class="btn btn-sm btn-outline-primary py-0 px-2 trigger-transcribe-btn d-flex align-items-center gap-1"
+                                    style="height: 28px; font-size: 0.75rem;"
+                                    onclick="triggerTranscribe('{{ rec.recording_id }}', this)"
+                                    title="Generate AI Transcript with Google Gemini 3.5 Transcribe Live">
+                                <i class="bi bi-stars text-warning"></i> Transcribe
+                            </button>
+                            {% else %}
+                            <span class="text-muted" style="font-size: 0.8rem;">-</span>
                             {% endif %}
                         </td>
                         <td>
@@ -403,4 +478,143 @@
         </div>
     </div>
 </div>
+
+<!-- Gemini 3.5 AI Transcript Modal -->
+<div class="modal fade" id="transcriptModal" tabindex="-1" aria-labelledby="transcriptModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content" style="background: var(--bg-secondary, #111827); border: 1px solid var(--border-color, rgba(255,255,255,0.1)); color: var(--text-primary, #f8fafc);">
+            <div class="modal-header border-secondary border-opacity-25 pb-2">
+                <div>
+                    <h5 class="modal-title d-flex align-items-center gap-2 mb-0" id="transcriptModalLabel">
+                        <i class="bi bi-stars text-warning"></i> Call AI Transcript
+                        <span class="badge" style="background-color: rgba(59, 130, 246, 0.2); color: #60a5fa; font-size: 0.72rem; font-weight: normal;">
+                            Google Gemini 3.5 Transcribe Live
+                        </span>
+                    </h5>
+                    <small class="text-muted" id="modal-subtitle">Recording ID</small>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body pt-3">
+                <!-- Metadata strip -->
+                <div class="p-2 mb-3 rounded" style="background: var(--bg-tertiary, #1e293b); font-size: 0.82rem; border: 1px solid rgba(255,255,255,0.05);">
+                    <div class="row g-2">
+                        <div class="col-6 col-sm-3">
+                            <span class="text-muted">Tenant:</span>
+                            <span id="modal-tenant" class="fw-semibold ms-1 text-primary">ADMIN</span>
+                        </div>
+                        <div class="col-6 col-sm-3">
+                            <span class="text-muted">Direction:</span>
+                            <span id="modal-direction" class="fw-semibold ms-1">INBOUND</span>
+                        </div>
+                        <div class="col-6 col-sm-3">
+                            <span class="text-muted">Caller:</span>
+                            <span id="modal-caller" class="font-monospace ms-1 text-info">+918009128306</span>
+                        </div>
+                        <div class="col-6 col-sm-3">
+                            <span class="text-muted">Duration:</span>
+                            <span id="modal-duration" class="font-monospace ms-1">0:27</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="position-relative">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label class="form-label text-muted small mb-0">STT Transcription Text (SMART Mode):</label>
+                        <span class="badge bg-secondary" style="font-size: 0.7rem;">Raw 16kHz PCM Streamed</span>
+                    </div>
+                    <div id="modal-transcript-text" 
+                         class="p-3 rounded font-monospace" 
+                         style="background: #0f172a; border: 1px solid rgba(255,255,255,0.08); font-size: 0.9rem; line-height: 1.6; min-height: 140px; max-height: 380px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary border-opacity-25 pt-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="copyModalTranscript()">
+                    <i class="bi bi-clipboard"></i> <span id="copy-btn-text">Copy Text</span>
+                </button>
+                <a id="modal-download-btn" href="#" class="btn btn-sm btn-outline-info">
+                    <i class="bi bi-download"></i> Download .txt
+                </a>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Handle Transcript Modal Display
+document.addEventListener('DOMContentLoaded', function() {
+    const transcriptModal = document.getElementById('transcriptModal');
+    if (transcriptModal) {
+        transcriptModal.addEventListener('show.bs.modal', function(event) {
+            const button = event.relatedTarget;
+            if (!button) return;
+
+            const recId = button.getAttribute('data-recording-id') || '';
+            const tenant = button.getAttribute('data-tenant') || 'ADMIN';
+            const caller = button.getAttribute('data-caller') || '-';
+            const callee = button.getAttribute('data-callee') || '-';
+            const direction = button.getAttribute('data-direction') || 'CALL';
+            const duration = button.getAttribute('data-duration') || '0:00';
+            const transcript = button.getAttribute('data-transcript') || '';
+
+            document.getElementById('modal-subtitle').textContent = recId;
+            document.getElementById('modal-tenant').textContent = tenant;
+            document.getElementById('modal-direction').textContent = direction;
+            document.getElementById('modal-caller').textContent = caller;
+            document.getElementById('modal-duration').textContent = duration;
+            document.getElementById('modal-transcript-text').textContent = transcript || 'No transcription available.';
+
+            const downloadBtn = document.getElementById('modal-download-btn');
+            if (downloadBtn) {
+                downloadBtn.href = '/egress/' + encodeURIComponent(recId) + '/transcript/download';
+            }
+        });
+    }
+});
+
+function copyModalTranscript() {
+    const textEl = document.getElementById('modal-transcript-text');
+    if (!textEl) return;
+    const text = textEl.textContent || '';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            const btnText = document.getElementById('copy-btn-text');
+            if (btnText) {
+                btnText.textContent = 'Copied!';
+                setTimeout(() => { btnText.textContent = 'Copy Text'; }, 1500);
+            }
+        });
+    }
+}
+
+async function triggerTranscribe(recordingId, btn) {
+    if (!recordingId || !btn) return;
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Transcribing...';
+
+    try {
+        const resp = await fetch('/egress/' + encodeURIComponent(recordingId) + '/transcribe', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        if (resp.ok) {
+            window.location.reload();
+        } else {
+            alert('Transcription failed to start. Please check the logs.');
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
+    } catch (e) {
+        console.error('Transcribe error:', e);
+        alert('Network error while requesting transcription.');
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+    }
+}
+</script>
 {% endblock %}
