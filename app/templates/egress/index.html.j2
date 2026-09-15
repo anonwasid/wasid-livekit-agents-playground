@@ -315,7 +315,7 @@
                             <span class="text-muted">-</span>
                             {% endif %}
                         </td>
-                        <td>
+                        <td id="transcript-cell-{{ rec.recording_id }}">
                             {% if rec.transcription %}
                             <div class="d-flex align-items-center gap-1">
                                 <button type="button" 
@@ -603,7 +603,8 @@ async function triggerTranscribe(recordingId, btn) {
             }
         });
         if (resp.ok) {
-            window.location.reload();
+            // Start polling for transcription result
+            startPollingTranscription(recordingId, btn);
         } else {
             alert('Transcription failed to start. Please check the logs.');
             btn.disabled = false;
@@ -616,5 +617,69 @@ async function triggerTranscribe(recordingId, btn) {
         btn.innerHTML = origHtml;
     }
 }
+
+function startPollingTranscription(recordingId, btn) {
+    const pollInterval = 3000; // 3 seconds
+    const maxAttempts = 60; // stop after 3 minutes
+    let attempts = 0;
+    const intervalId = setInterval(async () => {
+        attempts++;
+        try {
+            const resp = await fetch('/egress/' + encodeURIComponent(recordingId) + '/transcript');
+            if (!resp.ok) {
+                console.warn('Failed to fetch transcript status');
+                return;
+            }
+            const data = await resp.json();
+            if (data.transcription_status === 'completed') {
+                const cell = document.getElementById(`transcript-cell-${recordingId}`);
+                if (cell) {
+                    const transcriptEscaped = data.transcription ? data.transcription.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
+                    const callerNum = data.caller_number || '';
+                    const calleeNum = data.callee_number || '';
+                    const dir = (data.direction || '').toUpperCase();
+                    const startedAt = data.started_at ? data.started_at.substring(0, 19).replace('T', ' ') : '-';
+                    const durSec = data.duration_seconds || 0;
+                    const durStr = Math.floor(durSec / 60) + ':' + String(durSec % 60).padStart(2, '0');
+                    const viewBtnHtml = `<button type="button" class="btn btn-sm btn-outline-info view-transcript-btn d-flex align-items-center gap-1 py-0 px-2" style="height: 28px; font-size: 0.78rem;" data-bs-toggle="modal" data-bs-target="#transcriptModal" data-recording-id="${recordingId}" data-tenant="${data.tenant_id || 'ADMIN'}" data-caller="${callerNum}" data-callee="${calleeNum}" data-direction="${dir}" data-started="${startedAt}" data-duration="${durStr}" data-transcript="${transcriptEscaped}" title="View Gemini AI Transcript"><i class="bi bi-file-earmark-text"></i> View</button>`;
+                    const downloadBtnHtml = `<a href="/egress/${encodeURIComponent(recordingId)}/transcript/download" class="btn btn-sm btn-outline-secondary py-0 px-2" style="height: 28px; font-size: 0.78rem;" title="Download Transcript as Text File (.txt)"><i class="bi bi-download"></i> .txt</a>`;
+                    cell.innerHTML = `<div class="d-flex align-items-center gap-1">${viewBtnHtml}${downloadBtnHtml}</div>`;
+                }
+                clearInterval(intervalId);
+                return;
+            } else if (data.transcription_status === 'failed') {
+                const cell = document.getElementById(`transcript-cell-${recordingId}`);
+                if (cell) {
+                    cell.innerHTML = '<span class="badge bg-danger"><i class="bi bi-exclamation-triangle"></i> Failed</span>';
+                }
+                clearInterval(intervalId);
+                return;
+            }
+            // Still transcribing — check timeout
+            if (attempts >= maxAttempts) {
+                clearInterval(intervalId);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-stars text-warning"></i> Transcribe';
+                }
+            }
+        } catch (e) {
+            console.error('Polling error:', e);
+        }
+    }, pollInterval);
+}
+
+// Auto-poll for recordings already in "transcribing" state on page load
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('td[id^="transcript-cell-"]').forEach(function(cell) {
+        const spinner = cell.querySelector('.spinner-border');
+        if (spinner) {
+            const recordingId = cell.id.replace('transcript-cell-', '');
+            if (recordingId) {
+                startPollingTranscription(recordingId, null);
+            }
+        }
+    });
+});
 </script>
 {% endblock %}
