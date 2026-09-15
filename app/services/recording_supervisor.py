@@ -75,6 +75,13 @@ async def _supervise_recordings_loop():
                                 storage_object_key=file_key,
                             )
                             logger.info("Supervisor finalized closed call recording %s (%s)", rec["recording_id"], rname)
+                            if is_done and file_key:
+                                try:
+                                    from app.services.transcribe_gemini import gemini_transcribe
+                                    asyncio.create_task(gemini_transcribe.transcribe_recording(rec["recording_id"]))
+                                except Exception as err:
+                                    logger.debug("Supervisor auto-transcribe trigger error: %s", err)
+
 
         except Exception as e:
             logger.debug("Supervisor loop iteration encountered error: %s", e)

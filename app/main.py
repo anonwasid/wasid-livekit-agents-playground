@@ -48,6 +48,9 @@ async def lifespan(app: FastAPI):
         from app.services.db import telephony_db
         await telephony_db.init_db()
         print("✅ Telephony PostgreSQL/SQLite Database initialized")
+        stale_reset = await telephony_db.reset_stale_transcriptions()
+        if stale_reset:
+            print(f"🔄 Reset {stale_reset} stale 'transcribing' records to 'pending'")
     except Exception as e:
         print(f"⚠️ Failed to initialize Telephony Database: {e}")
 

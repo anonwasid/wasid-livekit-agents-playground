@@ -342,9 +342,22 @@
                                 </a>
                             </div>
                             {% elif rec.transcription_status == 'transcribing' %}
-                            <span class="badge bg-warning-subtle text-warning border border-warning d-inline-flex align-items-center gap-1" style="font-size: 0.75rem;">
-                                <span class="spinner-border spinner-border-sm" style="width: 0.7rem; height: 0.7rem;"></span> Transcribing...
-                            </span>
+                            <div class="d-inline-flex align-items-center gap-1">
+                                <span class="badge bg-warning-subtle text-warning border border-warning d-inline-flex align-items-center gap-1" style="font-size: 0.75rem;">
+                                    <span class="spinner-border spinner-border-sm" style="width: 0.7rem; height: 0.7rem;"></span> Transcribing...
+                                </span>
+                                <button type="button" class="btn btn-sm btn-link p-0 text-muted" onclick="triggerTranscribe('{{ rec.recording_id }}', this)" title="Force Retry" style="font-size: 0.75rem;">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                            </div>
+                            {% elif rec.transcription_status == 'failed' and rec.status == 'completed' %}
+                            <button type="button" 
+                                    class="btn btn-sm btn-outline-warning py-0 px-2 trigger-transcribe-btn d-flex align-items-center gap-1"
+                                    style="height: 28px; font-size: 0.75rem;"
+                                    onclick="triggerTranscribe('{{ rec.recording_id }}', this)"
+                                    title="Retry Gemini AI Transcript">
+                                <i class="bi bi-arrow-clockwise text-warning"></i> Retry
+                            </button>
                             {% elif rec.status == 'completed' %}
                             <button type="button" 
                                     class="btn btn-sm btn-outline-primary py-0 px-2 trigger-transcribe-btn d-flex align-items-center gap-1"
@@ -595,6 +608,12 @@ async function triggerTranscribe(recordingId, btn) {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Transcribing...';
 
+    // Immediately update cell content to show spinner
+    const cell = document.getElementById(`transcript-cell-${recordingId}`);
+    if (cell) {
+        cell.innerHTML = `<span class="badge bg-warning-subtle text-warning border border-warning d-inline-flex align-items-center gap-1" style="font-size: 0.75rem;"><span class="spinner-border spinner-border-sm" style="width: 0.7rem; height: 0.7rem;"></span> Transcribing...</span>`;
+    }
+
     try {
         const resp = await fetch('/egress/' + encodeURIComponent(recordingId) + '/transcribe', {
             method: 'POST',
@@ -603,24 +622,21 @@ async function triggerTranscribe(recordingId, btn) {
             }
         });
         if (resp.ok) {
-            // Start polling for transcription result
             startPollingTranscription(recordingId, btn);
         } else {
             alert('Transcription failed to start. Please check the logs.');
-            btn.disabled = false;
-            btn.innerHTML = origHtml;
+            if (cell) cell.innerHTML = origHtml;
         }
     } catch (e) {
         console.error('Transcribe error:', e);
         alert('Network error while requesting transcription.');
-        btn.disabled = false;
-        btn.innerHTML = origHtml;
+        if (cell) cell.innerHTML = origHtml;
     }
 }
 
 function startPollingTranscription(recordingId, btn) {
     const pollInterval = 3000; // 3 seconds
-    const maxAttempts = 60; // stop after 3 minutes
+    const maxAttempts = 80; // stop after 4 minutes for long calls
     let attempts = 0;
     const intervalId = setInterval(async () => {
         attempts++;
@@ -650,7 +666,7 @@ function startPollingTranscription(recordingId, btn) {
             } else if (data.transcription_status === 'failed') {
                 const cell = document.getElementById(`transcript-cell-${recordingId}`);
                 if (cell) {
-                    cell.innerHTML = '<span class="badge bg-danger"><i class="bi bi-exclamation-triangle"></i> Failed</span>';
+                    cell.innerHTML = `<button type="button" class="btn btn-sm btn-outline-warning py-0 px-2 trigger-transcribe-btn d-flex align-items-center gap-1" style="height: 28px; font-size: 0.75rem;" onclick="triggerTranscribe('${recordingId}', this)" title="Retry Gemini AI Transcript"><i class="bi bi-arrow-clockwise text-warning"></i> Retry</button>`;
                 }
                 clearInterval(intervalId);
                 return;
@@ -658,9 +674,9 @@ function startPollingTranscription(recordingId, btn) {
             // Still transcribing — check timeout
             if (attempts >= maxAttempts) {
                 clearInterval(intervalId);
-                if (btn) {
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="bi bi-stars text-warning"></i> Transcribe';
+                const cell = document.getElementById(`transcript-cell-${recordingId}`);
+                if (cell) {
+                    cell.innerHTML = `<button type="button" class="btn btn-sm btn-outline-warning py-0 px-2 trigger-transcribe-btn d-flex align-items-center gap-1" style="height: 28px; font-size: 0.75rem;" onclick="triggerTranscribe('${recordingId}', this)" title="Retry Gemini AI Transcript"><i class="bi bi-arrow-clockwise text-warning"></i> Retry</button>`;
                 }
             }
         } catch (e) {

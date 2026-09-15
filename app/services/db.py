@@ -694,6 +694,28 @@ class TelephonyDatabase:
                 await session.flush()
                 return True
 
+    async def reset_stale_transcriptions(self) -> int:
+        """Reset recordings stuck in 'transcribing' without transcript back to 'pending'."""
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            async with session.begin():
+                from sqlalchemy import or_, update
+                stmt = (
+                    update(CallRecordingRecord)
+                    .where(
+                        CallRecordingRecord.transcription_status == "transcribing",
+                        or_(
+                            CallRecordingRecord.transcription == None,
+                            CallRecordingRecord.transcription == "",
+                        ),
+                    )
+                    .values(transcription_status="pending")
+                )
+                res = await session.execute(stmt)
+                return res.rowcount or 0
+
+
     async def query_transcriptions(
         self,
         tenant_id: Optional[str] = None,

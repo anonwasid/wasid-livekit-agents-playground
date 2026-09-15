@@ -14,7 +14,6 @@ import subprocess
 import tempfile
 from typing import Optional
 
-import httpx
 import websockets
 
 from app.services.db import telephony_db
@@ -84,13 +83,13 @@ class GeminiTranscriptionService:
 
         if not audio_bytes or len(audio_bytes) < 100:
             logger.warning("Empty or truncated audio bytes passed to transcribe_audio_bytes")
-            return None
+            return "[No speech detected in call recording]"
 
         try:
             raw_pcm = await self._pcm_from_audio_bytes(audio_bytes)
             if not raw_pcm:
-                logger.warning("FFmpeg generated empty PCM audio stream, attempting REST fallback")
-                return await self._transcribe_via_rest_fallback(audio_bytes)
+                logger.warning("FFmpeg generated empty PCM audio stream")
+                return "[No speech detected in call recording]"
 
             ws_url = (
                 f"wss://generativelanguage.googleapis.com/ws/"
@@ -121,16 +120,18 @@ class GeminiTranscriptionService:
                 await ws.send(json.dumps(setup_msg))
 
                 # Wait for setupComplete response
-                init_resp = await asyncio.wait_for(ws.recv(), timeout=10.0)
+                init_resp = await asyncio.wait_for(ws.recv(), timeout=15.0)
                 logger.debug("Gemini Live connection initialized: %s", str(init_resp)[:100])
 
                 transcripts = []
-                stop_receiving = asyncio.Event()
+                streaming_done = asyncio.Event()
 
-                async def _receive_loop():
-                    while not stop_receiving.is_set():
+                async def receive_loop():
+                    while True:
                         try:
-                            raw_msg = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                            # While streaming use 0.5s timeout, after stream end wait up to 6.0s for next packet
+                            timeout_val = 6.0 if streaming_done.is_set() else 0.5
+                            raw_msg = await asyncio.wait_for(ws.recv(), timeout=timeout_val)
                             data = json.loads(raw_msg)
                             server_content = data.get("serverContent") or {}
                             input_tx = server_content.get("inputTranscription") or {}
@@ -139,14 +140,15 @@ class GeminiTranscriptionService:
                                 if text_segment and (not transcripts or transcripts[-1] != text_segment):
                                     transcripts.append(text_segment)
                         except asyncio.TimeoutError:
-                            continue
+                            if streaming_done.is_set():
+                                break
                         except Exception as ex:
                             logger.debug("Receive loop finished: %s", ex)
                             break
 
-                receiver_task = asyncio.create_task(_receive_loop())
+                recv_task = asyncio.create_task(receive_loop())
 
-                # 2. Stream 100ms PCM chunks
+                # 2. Stream 100ms PCM chunks (3,200 bytes per chunk at 16kHz mono)
                 total_len = len(raw_pcm)
                 for offset in range(0, total_len, CHUNK_SIZE_BYTES):
                     chunk = raw_pcm[offset:offset + CHUNK_SIZE_BYTES]
@@ -159,94 +161,27 @@ class GeminiTranscriptionService:
                         }
                     }
                     await ws.send(json.dumps(audio_payload))
-                    await asyncio.sleep(0.01)  # High-throughput streaming
+                    await asyncio.sleep(0.01)
 
                 # 3. Signal Audio Stream End
                 await ws.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
+                streaming_done.set()
+                logger.info("AudioStreamEnd sent, waiting for remaining transcripts...")
 
-                # Allow final transcription packets to arrive
-                await asyncio.sleep(4.0)
-                stop_receiving.set()
-                await receiver_task
+                # Wait for receive loop to capture all final transcription segments
+                await recv_task
 
                 full_text = " ".join(transcripts).strip()
                 if full_text:
-                    logger.info("Gemini Live transcription completed successfully (%d chars)", len(full_text))
+                    logger.info("Gemini Live transcription completed successfully (%d chars, %d segments)", len(full_text), len(transcripts))
                     return full_text
+                else:
+                    logger.info("Gemini Live returned 0 segments for audio (likely silence/no speech)")
+                    return "[No speech detected in call recording]"
 
         except Exception as e:
-            logger.warning("Gemini Live WebSocket transcription encountered error: %s. Falling back to REST API.", e)
-
-        # Fallback to direct Gemini multimodal audio transcription via REST
-        return await self._transcribe_via_rest_fallback(audio_bytes)
-
-    async def _transcribe_via_rest_fallback(self, audio_bytes: bytes) -> Optional[str]:
-        """Resilient fallback transcribing audio bytes using Gemini multimodal REST API."""
-        api_key = self.get_api_key()
-        if not api_key:
-            logger.error("REST fallback: GEMINI_API_KEY not set")
+            logger.exception("Gemini Live WebSocket transcription encountered error: %s", e)
             return None
-
-        # Auto-detect MIME type from file header
-        mime_type = "audio/mpeg"  # default
-        if audio_bytes[:4] == b'\x00\x00\x00\x20' or audio_bytes[4:8] == b'ftyp':
-            mime_type = "audio/mp4"
-        elif audio_bytes[:3] == b'ID3' or (audio_bytes[0:2] == b'\xff\xfb'):
-            mime_type = "audio/mpeg"
-        elif audio_bytes[:4] == b'RIFF':
-            mime_type = "audio/wav"
-        elif audio_bytes[:4] == b'OggS':
-            mime_type = "audio/ogg"
-
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-        b64_audio = base64.b64encode(audio_bytes).decode("utf-8")
-
-        logger.info("REST fallback: sending %d bytes as %s to Gemini", len(audio_bytes), mime_type)
-
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": (
-                                "Transcribe the following call audio accurately. "
-                                "Clean up disfluencies, remove filler words, format numbers and punctuation naturally. "
-                                "Output ONLY the cleaned transcription text with no preamble or commentary."
-                            )
-                        },
-                        {
-                            "inlineData": {
-                                "mimeType": mime_type,
-                                "data": b64_audio
-                            }
-                        }
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.2
-            }
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                res = await client.post(url, json=payload)
-                if res.status_code == 200:
-                    data = res.json()
-                    candidates = data.get("candidates") or []
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        if parts and "text" in parts[0]:
-                            text_out = parts[0]["text"].strip()
-                            logger.info("Gemini REST fallback transcription succeeded (%d chars)", len(text_out))
-                            return text_out
-                    logger.warning("Gemini REST fallback returned no candidates: %s", str(data)[:200])
-                else:
-                    logger.warning("Gemini REST fallback failed with status %d: %s", res.status_code, res.text[:300])
-        except Exception as ex:
-            logger.error("Gemini REST fallback error: %s", ex)
-
-        return None
 
     async def transcribe_recording(
         self,
@@ -286,15 +221,9 @@ class GeminiTranscriptionService:
                 await telephony_db.update_recording_transcription(recording_id, "", status="failed")
                 return None
 
-            logger.info("Fetched %d bytes from R2 for recording %s, starting transcription...", len(audio_bytes), recording_id)
+            logger.info("Fetched %d bytes from R2 for recording %s, starting Gemini 3.5 Live STT...", len(audio_bytes), recording_id)
 
-            # Try REST fallback first (more reliable than WebSocket for recorded audio)
-            transcript = await self._transcribe_via_rest_fallback(audio_bytes)
-
-            # If REST failed, try WebSocket streaming
-            if not transcript:
-                logger.info("REST fallback returned no result for %s, trying WebSocket streaming...", recording_id)
-                transcript = await self.transcribe_audio_bytes(audio_bytes, mode="SMART")
+            transcript = await self.transcribe_audio_bytes(audio_bytes, mode="SMART")
 
             if transcript:
                 await telephony_db.update_recording_transcription(recording_id, transcript, status="completed")
@@ -310,7 +239,7 @@ class GeminiTranscriptionService:
             try:
                 await telephony_db.update_recording_transcription(recording_id, "", status="failed")
             except Exception:
-                logger.exception("Failed to update status to 'failed' for recording %s", recording_id)
+                pass
             return None
 
 
