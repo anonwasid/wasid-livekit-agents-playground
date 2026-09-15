@@ -58,6 +58,9 @@ class GeminiTranscriptionService:
                     "-"
                 ]
                 return subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+            except Exception as e:
+                logger.error("FFmpeg conversion error: %s", e)
+                return b""
             finally:
                 if os.path.exists(in_path):
                     try:
@@ -86,8 +89,8 @@ class GeminiTranscriptionService:
         try:
             raw_pcm = await self._pcm_from_audio_bytes(audio_bytes)
             if not raw_pcm:
-                logger.warning("FFmpeg generated empty PCM audio stream")
-                return None
+                logger.warning("FFmpeg generated empty PCM audio stream, attempting REST fallback")
+                return await self._transcribe_via_rest_fallback(audio_bytes)
 
             ws_url = (
                 f"wss://generativelanguage.googleapis.com/ws/"
@@ -134,7 +137,7 @@ class GeminiTranscriptionService:
                         }
                     }
                     await ws.send(json.dumps(audio_payload))
-                    await asyncio.sleep(0.02)  # High-throughput pacing
+                    await asyncio.sleep(0.01)  # High-throughput streaming
 
                 # 3. Signal Audio Stream End
                 await ws.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
@@ -143,8 +146,9 @@ class GeminiTranscriptionService:
                 transcripts = []
                 idle_timeouts = 0
                 max_idle = 2  # up to 6s of silence after audio stream end
+                loop_start = asyncio.get_event_loop().time()
 
-                while idle_timeouts < max_idle:
+                while idle_timeouts < max_idle and (asyncio.get_event_loop().time() - loop_start) < 20.0:
                     try:
                         raw_msg = await asyncio.wait_for(ws.recv(), timeout=3.0)
                         data = json.loads(raw_msg)
@@ -154,6 +158,8 @@ class GeminiTranscriptionService:
                             text_segment = input_tx["text"].strip()
                             if text_segment and (not transcripts or transcripts[-1] != text_segment):
                                 transcripts.append(text_segment)
+                        if server_content.get("turnComplete"):
+                            break
                     except asyncio.TimeoutError:
                         idle_timeouts += 1
 
@@ -242,14 +248,15 @@ class GeminiTranscriptionService:
         object_key = rec.get("storage_object_key")
         audio_bytes = None
         if object_key and storage_r2.is_configured():
-            mp3_key = f"{object_key}.mp3"
-            if await storage_r2.object_exists(mp3_key):
-                audio_bytes = await storage_r2.get_object_bytes(mp3_key)
-            elif await storage_r2.object_exists(object_key):
+            if await storage_r2.object_exists(object_key):
                 audio_bytes = await storage_r2.get_object_bytes(object_key)
+            elif not object_key.endswith(".mp3"):
+                mp3_key = f"{object_key}.mp3"
+                if await storage_r2.object_exists(mp3_key):
+                    audio_bytes = await storage_r2.get_object_bytes(mp3_key)
 
         if not audio_bytes:
-            logger.error("No audio bytes available in R2 for recording %s", recording_id)
+            logger.error("No audio bytes available in R2 for recording %s (key: %s)", recording_id, object_key)
             await telephony_db.update_recording_transcription(recording_id, "", status="failed")
             return None
 
