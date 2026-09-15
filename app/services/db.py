@@ -10,6 +10,7 @@ Supports PostgreSQL via asyncpg with graceful SQLite fallback for tests and loca
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -252,6 +253,27 @@ class TelephonyDatabase:
                     if did in SYNTHETIC_SEED_DIDS or row.tenant_id in ("CIT49119004", "TZEE794100737"):
                         await session.delete(row)
                         del existing[did]
+
+                # Backfill historical recordings where caller_number was not parsed correctly
+                recs_res = await session.execute(select(CallRecordingRecord))
+                for rec in recs_res.scalars():
+                    rname = rec.room_name or ""
+                    is_inbound = rec.direction == "inbound"
+                    match = re.search(r'(?:sip-in|call-out|sip-out)[-_]+(?:\+)?(\d{10,15})', rname)
+                    if match:
+                        phone = f"+{match.group(1)}"
+                        if is_inbound and (not rec.caller_number or rec.caller_number == "Inbound Caller"):
+                            rec.caller_number = phone
+                            if not rec.callee_number:
+                                rec.callee_number = "+918065355408"
+                            if not rec.did_number:
+                                rec.did_number = "+918065355408"
+                        elif not is_inbound and (not rec.callee_number or rec.callee_number == rec.caller_number):
+                            rec.callee_number = phone
+                            if not rec.caller_number:
+                                rec.caller_number = "+918065355408"
+                            if not rec.did_number:
+                                rec.did_number = "+918065355408"
 
         self._initialized = True
         logger.info(

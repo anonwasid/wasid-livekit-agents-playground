@@ -216,6 +216,84 @@ class StorageR2Service:
             logger.warning("Error deleting object %s from R2: %s", object_key, e)
             return False
 
+    async def get_object_bytes(self, object_key: str) -> Optional[bytes]:
+        """Download raw object bytes from Cloudflare R2."""
+        if not self.is_configured:
+            return None
+        url = self.generate_presigned_url(object_key, expires_in=300)
+        if not url:
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                res = await client.get(url)
+                if res.status_code == 200:
+                    return res.content
+                logger.warning("Failed to fetch object %s: HTTP %d", object_key, res.status_code)
+        except Exception as e:
+            logger.warning("Error fetching object bytes for %s: %s", object_key, e)
+        return None
+
+    async def put_object_bytes(
+        self,
+        object_key: str,
+        data: bytes,
+        content_type: str = "audio/mpeg",
+    ) -> bool:
+        """Upload object bytes directly to Cloudflare R2 using AWS SigV4."""
+        if not self.is_configured:
+            return False
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+        date_stamp = now.strftime("%Y%m%d")
+
+        clean_key = object_key.lstrip("/")
+        canonical_uri = f"/{self.bucket}/{urllib.parse.quote(clean_key, safe='/')}"
+
+        payload_hash = hashlib.sha256(data).hexdigest()
+        canonical_headers = (
+            f"content-type:{content_type}\n"
+            f"host:{self.host}\n"
+            f"x-amz-content-sha256:{payload_hash}\n"
+            f"x-amz-date:{amz_date}\n"
+        )
+        signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date"
+        canonical_request = f"PUT\n{canonical_uri}\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
+
+        algorithm = "AWS4-HMAC-SHA256"
+        credential_scope = f"{date_stamp}/{self.region}/s3/aws4_request"
+        string_to_sign = (
+            f"{algorithm}\n{amz_date}\n{credential_scope}\n{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
+        )
+
+        signing_key = self._get_signature_key(date_stamp)
+        signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+
+        auth_header = (
+            f"{algorithm} Credential={self.access_key}/{credential_scope}, "
+            f"SignedHeaders={signed_headers}, Signature={signature}"
+        )
+
+        headers = {
+            "Content-Type": content_type,
+            "x-amz-date": amz_date,
+            "x-amz-content-sha256": payload_hash,
+            "Authorization": auth_header,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                res = await client.put(f"{self.endpoint}{canonical_uri}", headers=headers, content=data)
+                return res.status_code in (200, 201)
+        except Exception as e:
+            logger.warning("Error putting object %s to R2: %s", object_key, e)
+            return False
+
+    async def object_exists(self, object_key: str) -> bool:
+        """Check whether an object exists in Cloudflare R2."""
+        meta = await self.get_object_metadata(object_key)
+        return meta is not None
+
 
 # Singleton instance
 storage_r2 = StorageR2Service()

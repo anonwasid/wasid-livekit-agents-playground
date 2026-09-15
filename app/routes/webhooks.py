@@ -6,12 +6,14 @@ Listens for:
   - room_finished: Reconciles call lifecycles.
 """
 
+import asyncio
 import datetime
 import json
 import logging
 import os
+import re
 import uuid
-from typing import Optional
+from typing import Optional, Tuple
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response
 from livekit import api
@@ -74,6 +76,50 @@ async def livekit_webhook(
     return await process_verified_event(event)
 
 
+def extract_call_numbers(room_name: str, is_inbound: bool) -> Tuple[str, str, str]:
+    """Extract (caller_number, callee_number, did_number) accurately from room name."""
+    did = "+918065355408"
+    caller = ""
+    callee = ""
+
+    # Support patterns like:
+    # sip-in-_918009128306_McDm7ArZ6mqj
+    # sip-in-_+918065355408_RnDLfPfnVHqv
+    # call-out-+919876543210-1789420114
+    # sip-out-1726000000-ef8169
+    match = re.search(r'(?:sip-in|call-out|sip-out)[-_]+(?:\+)?(\d{10,15})', room_name)
+    if match:
+        extracted = match.group(1)
+        phone = f"+{extracted}"
+        if is_inbound:
+            caller = phone
+            callee = did
+        else:
+            caller = did
+            callee = phone
+    else:
+        # Fallback split
+        parts = room_name.replace("-", "_").split("_")
+        for part in parts:
+            clean = part.lstrip("+")
+            if clean.isdigit() and len(clean) >= 10:
+                phone = f"+{clean}"
+                if is_inbound:
+                    caller = phone
+                    callee = did
+                else:
+                    caller = did
+                    callee = phone
+                break
+
+    if not caller and is_inbound:
+        caller = "Inbound Caller"
+    if not callee:
+        callee = did
+
+    return caller, callee, did
+
+
 async def auto_start_room_recording(room_name: str, lk: LiveKitClient) -> Optional[str]:
     """Start audio-only room composite egress recording to Cloudflare R2 for a call room."""
     is_inbound = room_name.startswith("sip-in-")
@@ -94,19 +140,8 @@ async def auto_start_room_recording(room_name: str, lk: LiveKitClient) -> Option
     rec_id = f"rec_{now.strftime('%Y%m%d')}_{direction}_{call_rand}"
     object_key = f"recordings/{date_path}/{direction}/{rec_id}.m4a"
 
-    # Extract phone numbers from room name if formatted (e.g., sip-in-+918065355408_...)
-    caller = ""
-    callee = ""
-    parts = room_name.split("-")
-    if len(parts) >= 3:
-        potential_num = parts[2].split("_")[0]
-        if potential_num.startswith("+") or potential_num.isdigit():
-            if is_inbound:
-                caller = potential_num
-                callee = "+918065355408"
-            else:
-                caller = "+918065355408"
-                callee = potential_num
+    # Extract caller and callee contact numbers
+    caller, callee, did = extract_call_numbers(room_name, is_inbound)
 
     # 1. Create recording record in PostgreSQL
     await telephony_db.create_recording(
@@ -115,7 +150,7 @@ async def auto_start_room_recording(room_name: str, lk: LiveKitClient) -> Option
         direction=direction,
         caller_number=caller,
         callee_number=callee,
-        did_number="+918065355408",
+        did_number=did,
         tenant_id="wasid-hq",
         agent_id="wasid-ai-automation-master",
         status="recording",
@@ -153,6 +188,20 @@ async def auto_start_room_recording(room_name: str, lk: LiveKitClient) -> Option
             error_message=str(e),
         )
         return rec_id
+
+
+async def _background_convert_mp3(recording_id: str, file_key: str):
+    """Background task to transcode completed call recording to MP3 and cache in R2."""
+    if not file_key:
+        return
+    try:
+        from app.services.transcode import ensure_mp3_in_r2
+        mp3_key = await ensure_mp3_in_r2(file_key)
+        if mp3_key and mp3_key != file_key:
+            await telephony_db.update_recording(recording_id, storage_object_key=mp3_key)
+            logger.info("Auto-converted recording %s to MP3 in R2: %s", recording_id, mp3_key)
+    except Exception as e:
+        logger.warning("Background MP3 conversion failed for %s: %s", recording_id, e)
 
 
 async def process_verified_event(event) -> Response:
@@ -195,6 +244,7 @@ async def process_verified_event(event) -> Response:
             if not rec and rname:
                 rec = await telephony_db.get_recording_by_room(rname)
 
+
             if rec:
                 rec_id = rec["recording_id"]
                 await telephony_db.update_recording(
@@ -207,6 +257,8 @@ async def process_verified_event(event) -> Response:
                 )
                 logger.info("Finalized recording %s (egress %s): status=%s, duration=%ds, size=%d bytes",
                             rec_id, egress_id, status_str, duration_secs, file_size)
+                if status_str == "completed" and file_key:
+                    asyncio.create_task(_background_convert_mp3(rec_id, file_key))
 
     return Response(status_code=200, content="OK")
 
@@ -260,5 +312,7 @@ async def process_raw_webhook(data: dict) -> Response:
                 storage_object_key=file_key,
                 error_message=info.get("error"),
             )
+            if status_str == "completed" and file_key:
+                asyncio.create_task(_background_convert_mp3(rec_id, file_key))
 
     return Response(status_code=200, content="OK (raw)")

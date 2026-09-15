@@ -79,6 +79,9 @@ async def egress_index(
     return request.app.state.templates.TemplateResponse(request, template_name, template_data)
 
 
+from app.services.transcode import ensure_mp3_in_r2
+
+
 @router.get("/egress/{recording_id}/stream", dependencies=[Depends(requires_admin)])
 async def stream_recording(
     request: Request,
@@ -93,17 +96,32 @@ async def stream_recording(
     if not object_key:
         raise HTTPException(status_code=404, detail="Recording media file path not found")
 
+    # Determine stream key and appropriate media_type
+    stream_key = object_key
+    media_type = "audio/mpeg" if object_key.endswith(".mp3") else "audio/mp4"
+
+    # If cached MP3 is already available, prefer MP3 for best compatibility
+    if not object_key.endswith(".mp3"):
+        mp3_key = object_key.rsplit(".", 1)[0] + ".mp3"
+        try:
+            if await storage_r2.object_exists(mp3_key):
+                stream_key = mp3_key
+                media_type = "audio/mpeg"
+        except Exception:
+            pass
+
     try:
         range_header = request.headers.get("Range")
         status_code, resp_headers, body_stream = await storage_r2.stream_object(
-            object_key,
+            stream_key,
             range_header=range_header,
         )
+        resp_headers["Content-Type"] = media_type
         return StreamingResponse(
             body_stream,
             status_code=status_code,
             headers=resp_headers,
-            media_type="audio/mp4",
+            media_type=media_type,
         )
     except Exception as e:
         logger.error("Error streaming recording %s: %s", recording_id, e)
@@ -114,7 +132,7 @@ async def stream_recording(
 async def download_recording(
     recording_id: str,
 ):
-    """Directly download recording file with pre-signed Cloudflare R2 URL."""
+    """Directly download recording file in standard MP3 format with pre-signed Cloudflare R2 URL."""
     rec = await telephony_db.get_recording(recording_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Recording not found")
@@ -123,14 +141,34 @@ async def download_recording(
     if not object_key:
         raise HTTPException(status_code=404, detail="Recording file not available")
 
-    # Generate friendly filename
+    # Ensure recording is in standard MP3 format
+    target_key = object_key
+    try:
+        mp3_key = await ensure_mp3_in_r2(object_key)
+        if mp3_key:
+            target_key = mp3_key
+            if mp3_key != object_key:
+                # Update database record to point to cached MP3
+                try:
+                    await telephony_db.update_recording(recording_id, storage_object_key=mp3_key)
+                except Exception as e:
+                    logger.debug("Non-critical: could not update storage_object_key to MP3: %s", e)
+    except Exception as e:
+        logger.warning("MP3 transcoding fallback for %s: %s", recording_id, e)
+
+    # Generate friendly MP3 filename
     direction = rec.get("direction", "call")
-    caller = rec.get("caller_number", "unknown").replace("+", "")
+    caller = (rec.get("caller_number") or "caller").replace("+", "")
+    callee = (rec.get("callee_number") or rec.get("did_number") or "").replace("+", "")
     ts = rec.get("started_at", "call")[:10]
-    filename = f"{direction}_{caller}_{ts}_{recording_id[:8]}.m4a"
+    
+    if callee:
+        filename = f"{direction}_{caller}_to_{callee}_{ts}_{recording_id[:8]}.mp3"
+    else:
+        filename = f"{direction}_{caller}_{ts}_{recording_id[:8]}.mp3"
 
     url = storage_r2.generate_presigned_url(
-        object_key,
+        target_key,
         expires_in=600,
         download=True,
         filename=filename,

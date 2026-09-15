@@ -69,6 +69,15 @@ function fixTextColors() {
 
 // HTMX event handlers
 document.body.addEventListener('htmx:beforeRequest', function(event) {
+    // If any audio in the recordings table is currently playing, pause background refresh
+    const activeAudios = document.querySelectorAll('#recordings-table-body audio');
+    for (const audio of activeAudios) {
+        if (!audio.paused && !audio.ended) {
+            console.log('HTMX refresh paused: call recording audio is currently playing');
+            event.preventDefault();
+            return;
+        }
+    }
     console.log('HTMX request starting:', event.detail.path);
 });
 
@@ -76,10 +85,116 @@ document.body.addEventListener('htmx:afterRequest', function(event) {
     console.log('HTMX request completed:', event.detail.path);
 });
 
+document.body.addEventListener('htmx:afterSwap', function(event) {
+    initCustomAudioPlayers(event.detail.target || document);
+});
+
 document.body.addEventListener('htmx:responseError', function(event) {
     console.error('HTMX error:', event.detail);
     showNotification('Error loading data. Please refresh the page.', 'danger');
 });
+
+/**
+ * Format seconds to MM:SS string
+ */
+function formatAudioTime(seconds) {
+    if (isNaN(seconds) || seconds < 0) return "0:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+}
+
+/**
+ * Initialize all Custom Audio Players on the page
+ */
+function initCustomAudioPlayers(root = document) {
+    const players = (root || document).querySelectorAll('.custom-audio-player');
+    players.forEach(player => {
+        if (player._audioInitialized) return;
+        player._audioInitialized = true;
+
+        const audio = player.querySelector('audio');
+        const playBtn = player.querySelector('.audio-play-btn');
+        const scrubber = player.querySelector('.audio-scrubber');
+        const currentTimeSpan = player.querySelector('.audio-current-time');
+        const totalTimeSpan = player.querySelector('.audio-total-time');
+
+        if (!audio || !playBtn || !scrubber) return;
+
+        // Toggle Play / Pause
+        playBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (audio.paused) {
+                // Pause any other active audio player on the page
+                document.querySelectorAll('.custom-audio-player audio').forEach(otherAudio => {
+                    if (otherAudio !== audio && !otherAudio.paused) {
+                        otherAudio.pause();
+                    }
+                });
+
+                audio.play().then(() => {
+                    playBtn.innerHTML = '<i class="bi bi-pause-fill" style="font-size: 1.1rem;"></i>';
+                    playBtn.classList.remove('btn-primary');
+                    playBtn.classList.add('btn-warning');
+                    player.classList.add('is-playing');
+                }).catch(err => {
+                    console.error('Audio playback failed:', err);
+                });
+            } else {
+                audio.pause();
+                playBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 1.1rem; margin-left: 2px;"></i>';
+                playBtn.classList.remove('btn-warning');
+                playBtn.classList.add('btn-primary');
+                player.classList.remove('is-playing');
+            }
+        });
+
+        // Time Update during playback
+        audio.addEventListener('timeupdate', function() {
+            if (!audio.duration || isNaN(audio.duration)) return;
+            const pct = (audio.currentTime / audio.duration) * 100;
+            scrubber.value = pct;
+            currentTimeSpan.textContent = formatAudioTime(audio.currentTime);
+            totalTimeSpan.textContent = formatAudioTime(audio.duration);
+        });
+
+        // Loaded Metadata to ensure exact total duration
+        audio.addEventListener('loadedmetadata', function() {
+            if (audio.duration && !isNaN(audio.duration)) {
+                totalTimeSpan.textContent = formatAudioTime(audio.duration);
+            }
+        });
+
+        // Scrubber Seeking
+        scrubber.addEventListener('input', function() {
+            if (audio.duration && !isNaN(audio.duration)) {
+                const targetTime = (scrubber.value / 100) * audio.duration;
+                audio.currentTime = targetTime;
+                currentTimeSpan.textContent = formatAudioTime(targetTime);
+            }
+        });
+
+        // Playback Ended
+        audio.addEventListener('ended', function() {
+            playBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 1.1rem; margin-left: 2px;"></i>';
+            playBtn.classList.remove('btn-warning');
+            playBtn.classList.add('btn-primary');
+            player.classList.remove('is-playing');
+            scrubber.value = 0;
+            currentTimeSpan.textContent = "0:00";
+        });
+
+        // Audio Paused
+        audio.addEventListener('pause', function() {
+            playBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 1.1rem; margin-left: 2px;"></i>';
+            playBtn.classList.remove('btn-warning');
+            playBtn.classList.add('btn-primary');
+            player.classList.remove('is-playing');
+        });
+    });
+}
 
 // Utility Functions
 
@@ -504,6 +619,7 @@ window.DashboardNavigation = DashboardNavigation;
 document.addEventListener('DOMContentLoaded', function () {
     if (window.DashboardTheme) DashboardTheme.init();
     if (window.DashboardNavigation) DashboardNavigation.init();
+    initCustomAudioPlayers(document);
 });
 
 
