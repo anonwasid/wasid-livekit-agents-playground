@@ -206,15 +206,29 @@ class GeminiTranscriptionService:
             object_key = rec.get("storage_object_key")
             audio_bytes = None
             if object_key and storage_r2.is_configured():
+                # 1. Try directly fetching original object_key
                 try:
-                    if await storage_r2.object_exists(object_key):
-                        audio_bytes = await storage_r2.get_object_bytes(object_key)
-                    elif not object_key.endswith(".mp3"):
-                        mp3_key = f"{object_key}.mp3"
-                        if await storage_r2.object_exists(mp3_key):
-                            audio_bytes = await storage_r2.get_object_bytes(mp3_key)
-                except Exception as r2_err:
-                    logger.error("R2 fetch error for recording %s: %s", recording_id, r2_err)
+                    audio_bytes = await storage_r2.get_object_bytes(object_key)
+                except Exception as e:
+                    logger.debug("Fetch direct error for %s: %s", object_key, e)
+
+                # 2. If object_key is not .mp3, try the .mp3 variant
+                if not audio_bytes and not object_key.endswith(".mp3"):
+                    mp3_key = object_key.rsplit(".", 1)[0] + ".mp3"
+                    try:
+                        audio_bytes = await storage_r2.get_object_bytes(mp3_key)
+                    except Exception as e:
+                        logger.debug("Fetch mp3 error for %s: %s", mp3_key, e)
+
+                # 3. Try ensure_mp3_in_r2 transcoding
+                if not audio_bytes:
+                    try:
+                        from app.services.transcode import ensure_mp3_in_r2
+                        cached_mp3 = await ensure_mp3_in_r2(object_key)
+                        if cached_mp3:
+                            audio_bytes = await storage_r2.get_object_bytes(cached_mp3)
+                    except Exception as e:
+                        logger.debug("ensure_mp3_in_r2 error for %s: %s", object_key, e)
 
             if not audio_bytes:
                 logger.error("No audio bytes available in R2 for recording %s (key: %s)", recording_id, object_key)

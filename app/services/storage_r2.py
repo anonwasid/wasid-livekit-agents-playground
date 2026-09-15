@@ -63,8 +63,9 @@ class StorageR2Service:
         expires_in: int = 900,
         download: bool = False,
         filename: Optional[str] = None,
+        http_method: str = "GET",
     ) -> str:
-        """Generate an AWS SigV4 pre-signed GET URL for Cloudflare R2."""
+        """Generate an AWS SigV4 pre-signed URL for Cloudflare R2."""
         if not self.is_configured:
             logger.warning("R2 storage credentials not configured, cannot generate pre-signed URL")
             return ""
@@ -98,7 +99,7 @@ class StorageR2Service:
         payload_hash = "UNSIGNED-PAYLOAD"
 
         canonical_request = (
-            f"GET\n{canonical_uri}\n{canonical_querystring}\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
+            f"{http_method.upper()}\n{canonical_uri}\n{canonical_querystring}\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
         )
 
         algorithm = "AWS4-HMAC-SHA256"
@@ -117,7 +118,7 @@ class StorageR2Service:
         if not self.is_configured:
             return None
 
-        url = self.generate_presigned_url(object_key, expires_in=60)
+        url = self.generate_presigned_url(object_key, expires_in=60, http_method="HEAD")
         if not url:
             return None
 
