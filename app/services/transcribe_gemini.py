@@ -124,6 +124,28 @@ class GeminiTranscriptionService:
                 init_resp = await asyncio.wait_for(ws.recv(), timeout=10.0)
                 logger.debug("Gemini Live connection initialized: %s", str(init_resp)[:100])
 
+                transcripts = []
+                stop_receiving = asyncio.Event()
+
+                async def _receive_loop():
+                    while not stop_receiving.is_set():
+                        try:
+                            raw_msg = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                            data = json.loads(raw_msg)
+                            server_content = data.get("serverContent") or {}
+                            input_tx = server_content.get("inputTranscription") or {}
+                            if input_tx and "text" in input_tx:
+                                text_segment = input_tx["text"].strip()
+                                if text_segment and (not transcripts or transcripts[-1] != text_segment):
+                                    transcripts.append(text_segment)
+                        except asyncio.TimeoutError:
+                            continue
+                        except Exception as ex:
+                            logger.debug("Receive loop finished: %s", ex)
+                            break
+
+                receiver_task = asyncio.create_task(_receive_loop())
+
                 # 2. Stream 100ms PCM chunks
                 total_len = len(raw_pcm)
                 for offset in range(0, total_len, CHUNK_SIZE_BYTES):
@@ -142,26 +164,10 @@ class GeminiTranscriptionService:
                 # 3. Signal Audio Stream End
                 await ws.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
 
-                # 4. Collect transcription segments
-                transcripts = []
-                idle_timeouts = 0
-                max_idle = 2  # up to 6s of silence after audio stream end
-                loop_start = asyncio.get_event_loop().time()
-
-                while idle_timeouts < max_idle and (asyncio.get_event_loop().time() - loop_start) < 20.0:
-                    try:
-                        raw_msg = await asyncio.wait_for(ws.recv(), timeout=3.0)
-                        data = json.loads(raw_msg)
-                        server_content = data.get("serverContent") or {}
-                        input_tx = server_content.get("inputTranscription") or {}
-                        if input_tx and "text" in input_tx:
-                            text_segment = input_tx["text"].strip()
-                            if text_segment and (not transcripts or transcripts[-1] != text_segment):
-                                transcripts.append(text_segment)
-                        if server_content.get("turnComplete"):
-                            break
-                    except asyncio.TimeoutError:
-                        idle_timeouts += 1
+                # Allow final transcription packets to arrive
+                await asyncio.sleep(4.0)
+                stop_receiving.set()
+                await receiver_task
 
                 full_text = " ".join(transcripts).strip()
                 if full_text:
