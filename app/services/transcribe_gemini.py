@@ -205,7 +205,7 @@ class GeminiTranscriptionService:
             # Get audio bytes from R2
             object_key = rec.get("storage_object_key")
             audio_bytes = None
-            if object_key and storage_r2.is_configured():
+            if object_key and storage_r2.is_configured:
                 # 1. Try directly fetching original object_key
                 try:
                     audio_bytes = await storage_r2.get_object_bytes(object_key)

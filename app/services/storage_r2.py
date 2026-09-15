@@ -23,6 +23,12 @@ DEFAULT_R2_ENDPOINT = f"https://{DEFAULT_R2_ACCOUNT_ID}.r2.cloudflarestorage.com
 DEFAULT_R2_BUCKET = "n8n-production-backups"
 
 
+class _CallableBool(int):
+    """Boolean-like integer that is also callable like a method."""
+    def __call__(self) -> bool:
+        return bool(self)
+
+
 class StorageR2Service:
     """Async Cloudflare R2 Storage Manager."""
 
@@ -45,8 +51,10 @@ class StorageR2Service:
         self.host = parsed.netloc
 
     @property
-    def is_configured(self) -> bool:
-        return bool(self.access_key and self.secret_key and self.endpoint and self.bucket)
+    def is_configured(self) -> _CallableBool:
+        configured = bool(self.access_key and self.secret_key and self.endpoint and self.bucket)
+        return _CallableBool(1 if configured else 0)
+
 
     def _sign(self, key: bytes, msg: str) -> bytes:
         return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
