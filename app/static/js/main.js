@@ -20,6 +20,9 @@ document.addEventListener('DOMContentLoaded', function() {
             bsAlert.close();
         }, 5000);
     });
+
+    // Initialize custom audio players on page load
+    initCustomAudioPlayers(document);
 });
 
 /**
@@ -72,11 +75,16 @@ document.body.addEventListener('htmx:beforeRequest', function(event) {
     // If any audio in the recordings table is currently playing, pause background refresh
     const activeAudios = document.querySelectorAll('#recordings-table-body audio');
     for (const audio of activeAudios) {
-        if (!audio.paused && !audio.ended) {
+        if (!audio.paused && !audio.ended && audio.currentTime > 0) {
             console.log('HTMX refresh paused: call recording audio is currently playing');
             event.preventDefault();
             return;
         }
+    }
+    if (document.querySelector('.custom-audio-player.is-playing')) {
+        console.log('HTMX refresh paused: player has is-playing state');
+        event.preventDefault();
+        return;
     }
     console.log('HTMX request starting:', event.detail.path);
 });
@@ -86,7 +94,7 @@ document.body.addEventListener('htmx:afterRequest', function(event) {
 });
 
 document.body.addEventListener('htmx:afterSwap', function(event) {
-    initCustomAudioPlayers(event.detail.target || document);
+    initCustomAudioPlayers(document);
 });
 
 document.body.addEventListener('htmx:responseError', function(event) {
@@ -105,95 +113,129 @@ function formatAudioTime(seconds) {
 }
 
 /**
+ * Attach audio element event listeners for timeupdate, play, pause, ended, loadedmetadata
+ */
+function hookAudioEvents(player, audio, playBtn) {
+    if (!player || !audio || !playBtn || audio._eventsHooked) return;
+    audio._eventsHooked = true;
+
+    const scrubber = player.querySelector('.audio-scrubber');
+    const currentTimeSpan = player.querySelector('.audio-current-time');
+    const totalTimeSpan = player.querySelector('.audio-total-time');
+
+    audio.addEventListener('play', function() {
+        playBtn.innerHTML = '<i class="bi bi-pause-fill" style="font-size: 1.1rem;"></i>';
+        playBtn.classList.remove('btn-primary');
+        playBtn.classList.add('btn-warning');
+        player.classList.add('is-playing');
+    });
+
+    audio.addEventListener('pause', function() {
+        playBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 1.1rem; margin-left: 2px;"></i>';
+        playBtn.classList.remove('btn-warning');
+        playBtn.classList.add('btn-primary');
+        player.classList.remove('is-playing');
+    });
+
+    audio.addEventListener('ended', function() {
+        playBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 1.1rem; margin-left: 2px;"></i>';
+        playBtn.classList.remove('btn-warning');
+        playBtn.classList.add('btn-primary');
+        player.classList.remove('is-playing');
+        if (scrubber) scrubber.value = 0;
+        if (currentTimeSpan) currentTimeSpan.textContent = "0:00";
+    });
+
+    audio.addEventListener('timeupdate', function() {
+        const cur = audio.currentTime;
+        const dur = (audio.duration && !isNaN(audio.duration) && audio.duration > 0)
+            ? audio.duration
+            : parseFloat(player.dataset.duration || 0);
+
+        if (dur > 0) {
+            if (scrubber) scrubber.value = (cur / dur) * 100;
+            if (currentTimeSpan) currentTimeSpan.textContent = formatAudioTime(cur);
+            if (totalTimeSpan) totalTimeSpan.textContent = formatAudioTime(dur);
+        } else {
+            if (currentTimeSpan) currentTimeSpan.textContent = formatAudioTime(cur);
+        }
+    });
+
+    audio.addEventListener('loadedmetadata', function() {
+        if (audio.duration && !isNaN(audio.duration) && totalTimeSpan) {
+            totalTimeSpan.textContent = formatAudioTime(audio.duration);
+        }
+    });
+}
+
+/**
  * Initialize all Custom Audio Players on the page
  */
 function initCustomAudioPlayers(root = document) {
-    const players = (root || document).querySelectorAll('.custom-audio-player');
+    const doc = (root && root.querySelectorAll) ? root : document;
+    const players = doc.querySelectorAll('.custom-audio-player');
     players.forEach(player => {
-        if (player._audioInitialized) return;
-        player._audioInitialized = true;
-
         const audio = player.querySelector('audio');
         const playBtn = player.querySelector('.audio-play-btn');
-        const scrubber = player.querySelector('.audio-scrubber');
-        const currentTimeSpan = player.querySelector('.audio-current-time');
-        const totalTimeSpan = player.querySelector('.audio-total-time');
-
-        if (!audio || !playBtn || !scrubber) return;
-
-        // Toggle Play / Pause
-        playBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-
-            if (audio.paused) {
-                // Pause any other active audio player on the page
-                document.querySelectorAll('.custom-audio-player audio').forEach(otherAudio => {
-                    if (otherAudio !== audio && !otherAudio.paused) {
-                        otherAudio.pause();
-                    }
-                });
-
-                audio.play().then(() => {
-                    playBtn.innerHTML = '<i class="bi bi-pause-fill" style="font-size: 1.1rem;"></i>';
-                    playBtn.classList.remove('btn-primary');
-                    playBtn.classList.add('btn-warning');
-                    player.classList.add('is-playing');
-                }).catch(err => {
-                    console.error('Audio playback failed:', err);
-                });
-            } else {
-                audio.pause();
-                playBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 1.1rem; margin-left: 2px;"></i>';
-                playBtn.classList.remove('btn-warning');
-                playBtn.classList.add('btn-primary');
-                player.classList.remove('is-playing');
-            }
-        });
-
-        // Time Update during playback
-        audio.addEventListener('timeupdate', function() {
-            if (!audio.duration || isNaN(audio.duration)) return;
-            const pct = (audio.currentTime / audio.duration) * 100;
-            scrubber.value = pct;
-            currentTimeSpan.textContent = formatAudioTime(audio.currentTime);
-            totalTimeSpan.textContent = formatAudioTime(audio.duration);
-        });
-
-        // Loaded Metadata to ensure exact total duration
-        audio.addEventListener('loadedmetadata', function() {
-            if (audio.duration && !isNaN(audio.duration)) {
-                totalTimeSpan.textContent = formatAudioTime(audio.duration);
-            }
-        });
-
-        // Scrubber Seeking
-        scrubber.addEventListener('input', function() {
-            if (audio.duration && !isNaN(audio.duration)) {
-                const targetTime = (scrubber.value / 100) * audio.duration;
-                audio.currentTime = targetTime;
-                currentTimeSpan.textContent = formatAudioTime(targetTime);
-            }
-        });
-
-        // Playback Ended
-        audio.addEventListener('ended', function() {
-            playBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 1.1rem; margin-left: 2px;"></i>';
-            playBtn.classList.remove('btn-warning');
-            playBtn.classList.add('btn-primary');
-            player.classList.remove('is-playing');
-            scrubber.value = 0;
-            currentTimeSpan.textContent = "0:00";
-        });
-
-        // Audio Paused
-        audio.addEventListener('pause', function() {
-            playBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 1.1rem; margin-left: 2px;"></i>';
-            playBtn.classList.remove('btn-warning');
-            playBtn.classList.add('btn-primary');
-            player.classList.remove('is-playing');
-        });
+        if (audio && playBtn) {
+            hookAudioEvents(player, audio, playBtn);
+        }
     });
+}
+
+// Global Delegated Play / Pause Click Handler
+document.addEventListener('click', function(e) {
+    const playBtn = e.target.closest('.audio-play-btn');
+    if (!playBtn) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const player = playBtn.closest('.custom-audio-player');
+    if (!player) return;
+    const audio = player.querySelector('audio');
+    if (!audio) return;
+
+    hookAudioEvents(player, audio, playBtn);
+
+    if (audio.paused) {
+        // Pause any other active audio player on the page
+        document.querySelectorAll('.custom-audio-player audio').forEach(otherAudio => {
+            if (otherAudio !== audio && !otherAudio.paused) {
+                otherAudio.pause();
+            }
+        });
+        audio.play().catch(err => console.error('Audio playback failed:', err));
+    } else {
+        audio.pause();
+    }
+});
+
+// Global Delegated Scrubber Handler
+function handleScrubberInput(e) {
+    const scrubber = e.target.closest('.audio-scrubber');
+    if (!scrubber) return;
+    const player = scrubber.closest('.custom-audio-player');
+    if (!player) return;
+    const audio = player.querySelector('audio');
+    if (!audio) return;
+    const currentTimeSpan = player.querySelector('.audio-current-time');
+
+    let dur = (audio.duration && !isNaN(audio.duration) && audio.duration > 0)
+        ? audio.duration
+        : parseFloat(player.dataset.duration || 0);
+
+    if (dur > 0) {
+        const targetTime = (parseFloat(scrubber.value) / 100) * dur;
+        audio.currentTime = targetTime;
+        if (currentTimeSpan) currentTimeSpan.textContent = formatAudioTime(targetTime);
+    }
+}
+document.addEventListener('input', handleScrubberInput);
+document.addEventListener('change', handleScrubberInput);
+
+// Run initialization immediately if DOM is already ready
+if (document.readyState === 'interactive' || document.readyState === 'complete') {
+    initCustomAudioPlayers(document);
 }
 
 // Utility Functions
