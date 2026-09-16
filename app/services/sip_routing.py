@@ -576,7 +576,18 @@ class SipRoutingService:
             meta_dict.update(call_context)
         call_meta = json.dumps(meta_dict)
 
-        # 4. Dispatch canonical agent to the unique room
+        # 4. Pre-create LiveKit Room with authoritative metadata
+        try:
+            await lk.create_room(
+                name=room_name,
+                empty_timeout=300,
+                metadata=call_meta,
+            )
+            logger.info("Pre-created LiveKit room '%s' with authoritative metadata", room_name)
+        except Exception as re:
+            logger.warning("Could not pre-create LiveKit room explicitly (proceeding to dispatch): %s", re)
+
+        # 5. Dispatch canonical agent to the unique room
         try:
             await lk.create_dispatch(
                 agent_name=agent_name,

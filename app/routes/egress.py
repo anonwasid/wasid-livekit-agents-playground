@@ -319,12 +319,14 @@ async def get_transcriptions_api(
     phone_number: Optional[str] = Query(None, description="Filter by caller or recipient phone number"),
     date: Optional[str] = Query(None, description="Filter by date string (YYYY-MM-DD)"),
     recording_id: Optional[str] = Query(None, description="Filter by specific recording ID"),
+    call_id: Optional[str] = Query(None, description="Filter by specific call ID"),
+    room_name: Optional[str] = Query(None, description="Filter by specific LiveKit room name"),
     format: Optional[str] = Query("json", description="Output format: json or text"),
     limit: int = Query(100, ge=1, le=500),
 ):
     """
     Dedicated Querying API to retrieve call transcriptions.
-    Filtered by tenant ID, DID number, caller/callee phone number, date, or recording ID.
+    Filtered by call ID, room name, tenant ID, DID number, caller/callee phone number, date, or recording ID.
     Used for downstream AI summarization, CRM synchronization, and data extraction.
     """
     try:
@@ -334,6 +336,8 @@ async def get_transcriptions_api(
             phone_number=phone_number,
             date_str=date,
             recording_id=recording_id,
+            call_id=call_id,
+            room_name=room_name,
             limit=limit,
         )
         if format and format.lower() == "text":
@@ -352,6 +356,8 @@ async def get_transcriptions_api(
                 "phone_number": phone_number,
                 "date": date,
                 "recording_id": recording_id,
+                "call_id": call_id,
+                "room_name": room_name,
             },
             "transcriptions": results,
         }

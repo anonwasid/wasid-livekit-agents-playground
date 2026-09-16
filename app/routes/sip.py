@@ -66,6 +66,36 @@ async def api_create_outbound_sip_call(
         raise HTTPException(status_code=500, detail=f"Failed to place outbound call: {str(e)}")
 
 
+@router.get("/api/v1/sip/call-context")
+async def api_get_call_context(
+    room_name: Optional[str] = None,
+    call_id: Optional[str] = None,
+):
+    """Retrieve structured call & lead context for agent runtime fallback."""
+    from app.services.db import telephony_db
+    target_id = room_name or call_id
+    if not target_id:
+        raise HTTPException(status_code=400, detail="Must provide room_name or call_id")
+
+    ctx = await telephony_db.get_call_context(target_id)
+    if not ctx.get("found"):
+        raise HTTPException(status_code=404, detail=ctx.get("error", "Call context not found"))
+    return ctx
+
+
+@router.get("/api/v1/sip/caller-lookup")
+async def api_lookup_caller(
+    phone: str,
+):
+    """Identify if incoming caller is an existing lead or registered customer."""
+    from app.services.db import telephony_db
+    if not phone:
+        raise HTTPException(status_code=400, detail="Phone number is required")
+
+    return await telephony_db.lookup_caller(phone)
+
+
+
 @router.get("/sip-outbound", response_class=HTMLResponse, dependencies=[Depends(requires_admin)])
 async def sip_outbound_index(
     request: Request,

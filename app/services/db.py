@@ -434,18 +434,21 @@ class TelephonyDatabase:
         outcome: Optional[str] = None,
         transcript: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Record the completion of a call."""
+        """Record the completion of a call by call_id or room_name."""
         await self.init_db()
         sessionmaker = self.get_sessionmaker()
         async with sessionmaker() as session:
             async with session.begin():
-                stmt = select(CallRecord).where(CallRecord.call_id == call_id)
+                stmt = select(CallRecord).where(
+                    or_(CallRecord.call_id == call_id, CallRecord.room_name == call_id)
+                )
                 result = await session.execute(stmt)
                 record = result.scalars().first()
                 if not record:
                     return None
 
-                record.duration_seconds = duration_seconds
+                if duration_seconds > 0 or record.duration_seconds == 0:
+                    record.duration_seconds = duration_seconds
                 record.status = status
                 record.outcome = outcome or ("completed" if status == "completed" else "failed")
                 if transcript:
@@ -725,9 +728,11 @@ class TelephonyDatabase:
         started_before: Optional[datetime] = None,
         date_str: Optional[str] = None,
         recording_id: Optional[str] = None,
+        call_id: Optional[str] = None,
+        room_name: Optional[str] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
-        """Query transcripts by tenant ID, DID, phone, timestamps, or recording ID."""
+        """Query transcripts by call_id, room_name, tenant ID, DID, phone, timestamps, or recording ID."""
         await self.init_db()
         sessionmaker = self.get_sessionmaker()
         async with sessionmaker() as session:
@@ -737,13 +742,29 @@ class TelephonyDatabase:
             )
             if recording_id:
                 stmt = stmt.where(CallRecordingRecord.recording_id == recording_id)
+            if call_id:
+                stmt = stmt.where(
+                    or_(
+                        CallRecordingRecord.call_id == call_id,
+                        CallRecordingRecord.recording_id == call_id,
+                    )
+                )
+            if room_name:
+                stmt = stmt.where(CallRecordingRecord.room_name == room_name)
             if tenant_id and tenant_id.lower() != "all":
-                if tenant_id.upper() == "ADMIN":
+                if tenant_id.upper() == "ADMIN" and not (call_id or room_name or phone_number):
                     stmt = stmt.where(
                         or_(
                             CallRecordingRecord.tenant_id == "ADMIN",
                             CallRecordingRecord.tenant_id == "wasid-hq",
                             CallRecordingRecord.did_number == "+918065355408",
+                        )
+                    )
+                elif tenant_id.upper() == "ADMIN":
+                    stmt = stmt.where(
+                        or_(
+                            CallRecordingRecord.tenant_id == "ADMIN",
+                            CallRecordingRecord.tenant_id == "wasid-hq",
                         )
                     )
                 else:
@@ -867,6 +888,124 @@ class TelephonyDatabase:
                 "total_duration_seconds": total_duration,
                 "total_file_size_bytes": total_bytes,
             }
+
+    async def get_call_context(self, identifier: str) -> Dict[str, Any]:
+        """Fetch full structured call and lead context by call_id or room_name."""
+        if not identifier:
+            return {"found": False, "error": "No identifier provided"}
+
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            stmt = select(CallRecord).where(
+                or_(CallRecord.call_id == identifier, CallRecord.room_name == identifier)
+            )
+            result = await session.execute(stmt)
+            record = result.scalars().first()
+            if not record:
+                return {"found": False, "error": f"Call record '{identifier}' not found"}
+
+            meta: Dict[str, Any] = {}
+            if record.metadata_json:
+                try:
+                    meta = json.loads(record.metadata_json)
+                except Exception:
+                    pass
+
+            lead_id = meta.get("lead_id") or ""
+            phone = record.callee_did or record.caller_did or ""
+
+            # If prospect details are not in call metadata, fetch from customer_leads
+            customer_name = meta.get("customer_name") or meta.get("name") or ""
+            company_name = meta.get("company_name") or meta.get("company") or ""
+            industry = meta.get("industry") or ""
+            source = meta.get("source") or ""
+            reqs = meta.get("original_requirement") or meta.get("requirements") or meta.get("notes") or ""
+            ai_summary = meta.get("ai_consultant_summary") or meta.get("ai_summary") or ""
+
+            if not (customer_name and company_name):
+                try:
+                    lead_query = text(
+                        "SELECT id, name, company_name, industry, source, ai_summary, notes, tenant_id "
+                        "FROM customer_leads WHERE id = :lead_id OR phone = :phone LIMIT 1"
+                    )
+                    lead_res = await session.execute(lead_query, {"lead_id": lead_id, "phone": phone})
+                    lead_row = lead_res.fetchone()
+                    if lead_row:
+                        customer_name = customer_name or lead_row[1] or ""
+                        company_name = company_name or lead_row[2] or ""
+                        industry = industry or lead_row[3] or ""
+                        source = source or lead_row[4] or ""
+                        ai_summary = ai_summary or lead_row[5] or ""
+                        reqs = reqs or lead_row[6] or ""
+                except Exception as le:
+                    logger.debug("Could not query customer_leads for call context: %s", le)
+
+            call_dir = (record.direction or "OUTBOUND").upper()
+            return {
+                "found": True,
+                "call_id": record.call_id,
+                "room_name": record.room_name,
+                "direction": record.direction,
+                "call_direction": call_dir,
+                "caller_did": record.caller_did,
+                "callee_did": record.callee_did,
+                "agent_id": record.agent_id,
+                "tenant_id": record.tenant_id,
+                "voice_mode": meta.get("voice_mode") or meta.get("mode") or "realtime",
+                "customer_name": customer_name,
+                "company_name": company_name,
+                "phone_number": phone,
+                "industry": industry,
+                "source": source,
+                "original_requirement": reqs,
+                "ai_consultant_summary": ai_summary,
+                "call_objective": meta.get("call_objective") or "Confirm demo booking and qualify workflow automation requirements",
+                "script": meta.get("script") or meta.get("opening_script") or "",
+                "whatsapp_context": meta.get("whatsapp_context") or "",
+                "metadata": meta,
+            }
+
+    async def lookup_caller(self, phone_number: str) -> Dict[str, Any]:
+        """Lookup caller phone against customer_leads to distinguish known leads from unknown callers."""
+        if not phone_number:
+            return {"found": False, "reason": "empty_phone"}
+
+        clean = re.sub(r"[^\d]", "", phone_number)
+        phone_tail = clean[-10:] if len(clean) >= 10 else clean
+        if not phone_tail:
+            return {"found": False, "reason": "invalid_phone"}
+
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            try:
+                # Query matching customer_leads
+                pattern = f"%{phone_tail}%"
+                query = text(
+                    "SELECT id, tenant_id, name, phone, company_name, industry, source, ai_summary, notes, status "
+                    "FROM customer_leads WHERE phone LIKE :pattern ORDER BY created_at DESC LIMIT 1"
+                )
+                res = await session.execute(query, {"pattern": pattern})
+                row = res.fetchone()
+                if row:
+                    return {
+                        "found": True,
+                        "lead_id": row[0],
+                        "tenant_id": row[1],
+                        "customer_name": row[2] or "",
+                        "phone": row[3] or "",
+                        "company_name": row[4] or "",
+                        "industry": row[5] or "",
+                        "source": row[6] or "",
+                        "ai_summary": row[7] or "",
+                        "original_requirement": row[8] or "",
+                        "status": row[9] or "",
+                    }
+            except Exception as e:
+                logger.debug("Error querying customer_leads in lookup_caller: %s", e)
+
+            return {"found": False, "phone": phone_number}
 
 
 # Singleton instance

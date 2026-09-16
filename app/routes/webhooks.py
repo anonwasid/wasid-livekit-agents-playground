@@ -169,6 +169,22 @@ async def auto_start_room_recording(room_name: str, lk: LiveKitClient) -> Option
     )
     logger.info("Created call recording record %s for room %s (tenant: %s)", rec_id, room_name, tenant_id)
 
+    # For inbound calls, ensure calls table has an entry with correct caller vs callee numbers
+    if is_inbound:
+        try:
+            await telephony_db.record_call_start(
+                call_id=rec_id,
+                room_name=room_name,
+                direction="inbound",
+                caller_did=caller,
+                callee_did=did,
+                agent_id="wasid-ai-automation-master",
+                tenant_id=tenant_id,
+                metadata={"room_name": room_name, "inbound": True}
+            )
+        except Exception as cie:
+            logger.debug("Could not record inbound call start in calls table: %s", cie)
+
     # 2. Trigger LiveKit Egress recording
     try:
         egress_res = await lk.start_room_composite_egress(
@@ -280,6 +296,34 @@ async def process_verified_event(event) -> Response:
                     asyncio.create_task(_background_convert_mp3(rec_id, file_key))
                     asyncio.create_task(_background_transcribe(rec_id))
 
+            # Synchronize calls table lifecycle and duration
+            if rname:
+                try:
+                    await telephony_db.record_call_end(
+                        call_id=rname,
+                        duration_seconds=duration_secs,
+                        status=status_str,
+                    )
+                except Exception as ce:
+                    logger.debug("Failed to record call end on egress_ended: %s", ce)
+
+    elif event_name == "room_finished":
+        room = getattr(event, "room", None)
+        rname = getattr(room, "name", "") if room else ""
+        if rname:
+            dur = 0
+            if hasattr(room, "duration") and getattr(room, "duration", 0):
+                dur = int(getattr(room, "duration", 0))
+            try:
+                await telephony_db.record_call_end(
+                    call_id=rname,
+                    duration_seconds=dur,
+                    status="completed",
+                )
+                logger.info("Recorded call completion for finished room '%s' (duration: %ds)", rname, dur)
+            except Exception as ce:
+                logger.debug("Failed to record call end on room_finished: %s", ce)
+
     return Response(status_code=200, content="OK")
 
 
@@ -335,5 +379,30 @@ async def process_raw_webhook(data: dict) -> Response:
             if status_str == "completed" and file_key:
                 asyncio.create_task(_background_convert_mp3(rec_id, file_key))
                 asyncio.create_task(_background_transcribe(rec_id))
+
+        if rname:
+            try:
+                await telephony_db.record_call_end(
+                    call_id=rname,
+                    duration_seconds=duration_secs,
+                    status=status_str,
+                )
+            except Exception as ce:
+                logger.debug("Failed to record raw call end on egress_ended: %s", ce)
+
+    elif event_name == "room_finished":
+        room = data.get("room", {})
+        rname = room.get("name", "")
+        if rname:
+            dur = room.get("duration", 0) or 0
+            try:
+                await telephony_db.record_call_end(
+                    call_id=rname,
+                    duration_seconds=int(dur),
+                    status="completed",
+                )
+                logger.info("Recorded raw call completion for finished room '%s' (duration: %ds)", rname, dur)
+            except Exception as ce:
+                logger.debug("Failed to record raw call end on room_finished: %s", ce)
 
     return Response(status_code=200, content="OK (raw)")
