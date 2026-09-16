@@ -166,6 +166,7 @@ class CallRecordingRecord(Base):
             "storage_bucket": self.storage_bucket,
             "storage_object_key": self.storage_object_key,
             "media_url": self.media_url,
+            "download_url": f"https://lkdashboard.wasidai.com/api/v1/egress/{self.recording_id}/download" if self.recording_id else None,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "ended_at": self.ended_at.isoformat() if self.ended_at else None,
             "error_message": self.error_message,
@@ -736,23 +737,67 @@ class TelephonyDatabase:
         await self.init_db()
         sessionmaker = self.get_sessionmaker()
         async with sessionmaker() as session:
+            # Auto-correlate missing call_id/tenant_id from calls table where room_name matches
+            if room_name or call_id:
+                try:
+                    c_lookup = room_name or call_id
+                    sub_stmt = select(CallRecord).where(
+                        or_(CallRecord.room_name == c_lookup, CallRecord.call_id == c_lookup)
+                    )
+                    c_res = await session.execute(sub_stmt)
+                    c_match = c_res.scalars().first()
+                    if c_match:
+                        await session.execute(
+                            update(CallRecordingRecord)
+                            .where(
+                                CallRecordingRecord.room_name == c_match.room_name,
+                                or_(CallRecordingRecord.call_id.is_(None), CallRecordingRecord.tenant_id.in_(["ADMIN", "wasid-hq"]))
+                            )
+                            .values(call_id=c_match.call_id, tenant_id=c_match.tenant_id)
+                        )
+                        await session.commit()
+                except Exception as bfe:
+                    logger.debug("Correlation sync non-fatal: %s", bfe)
+
             stmt = select(CallRecordingRecord).where(
                 CallRecordingRecord.status != "deleted",
                 CallRecordingRecord.transcription.isnot(None),
             )
             if recording_id:
                 stmt = stmt.where(CallRecordingRecord.recording_id == recording_id)
-            if call_id:
+            if room_name and call_id:
                 stmt = stmt.where(
                     or_(
+                        CallRecordingRecord.room_name == room_name,
                         CallRecordingRecord.call_id == call_id,
                         CallRecordingRecord.recording_id == call_id,
                     )
                 )
-            if room_name:
-                stmt = stmt.where(CallRecordingRecord.room_name == room_name)
+            elif room_name:
+                stmt = stmt.where(
+                    or_(
+                        CallRecordingRecord.room_name == room_name,
+                        CallRecordingRecord.call_id == room_name,
+                    )
+                )
+            elif call_id:
+                stmt = stmt.where(
+                    or_(
+                        CallRecordingRecord.call_id == call_id,
+                        CallRecordingRecord.room_name == call_id,
+                        CallRecordingRecord.recording_id == call_id,
+                    )
+                )
             if tenant_id and tenant_id.lower() != "all":
-                if tenant_id.upper() == "ADMIN" and not (call_id or room_name or phone_number):
+                if room_name or call_id:
+                    # When querying a specific unique room or call, match tenant or allow platform carrier ADMIN records
+                    stmt = stmt.where(
+                        or_(
+                            CallRecordingRecord.tenant_id.ilike(f"%{tenant_id}%"),
+                            CallRecordingRecord.tenant_id.in_(["ADMIN", "wasid-hq"]),
+                        )
+                    )
+                elif tenant_id.upper() == "ADMIN" and not phone_number:
                     stmt = stmt.where(
                         or_(
                             CallRecordingRecord.tenant_id == "ADMIN",

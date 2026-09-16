@@ -143,9 +143,23 @@ async def auto_start_room_recording(room_name: str, lk: LiveKitClient) -> Option
     # Extract caller and callee contact numbers
     caller, callee, did = extract_call_numbers(room_name, is_inbound)
 
-    # Resolve tenant ID (Default to ADMIN for admin DID +918065355408 or unassigned)
+    # Resolve tenant ID and call_id from call context / routing
     tenant_id = "ADMIN"
-    if did and did != "+918065355408":
+    call_id = None
+    try:
+        call_ctx = await telephony_db.get_call_context(room_name)
+        if call_ctx.get("found"):
+            call_id = call_ctx.get("call_id")
+            if call_ctx.get("tenant_id") and call_ctx.get("tenant_id") != "ADMIN":
+                tenant_id = call_ctx.get("tenant_id")
+            if call_ctx.get("caller_did") and not caller:
+                caller = call_ctx.get("caller_did")
+            if call_ctx.get("callee_did") and not callee:
+                callee = call_ctx.get("callee_did")
+    except Exception as ctx_err:
+        logger.debug("Could not resolve call context for %s: %s", room_name, ctx_err)
+
+    if tenant_id == "ADMIN" and did and did != "+918065355408":
         try:
             routing = await telephony_db.get_did_routing(did)
             if routing and routing.get("tenant_id"):
@@ -156,6 +170,7 @@ async def auto_start_room_recording(room_name: str, lk: LiveKitClient) -> Option
     # 1. Create recording record in PostgreSQL
     await telephony_db.create_recording(
         recording_id=rec_id,
+        call_id=call_id,
         room_name=room_name,
         direction=direction,
         caller_number=caller,
@@ -167,7 +182,7 @@ async def auto_start_room_recording(room_name: str, lk: LiveKitClient) -> Option
         storage_bucket=storage_r2.bucket,
         storage_object_key=object_key,
     )
-    logger.info("Created call recording record %s for room %s (tenant: %s)", rec_id, room_name, tenant_id)
+    logger.info("Created call recording record %s for room %s (call_id: %s, tenant: %s)", rec_id, room_name, call_id, tenant_id)
 
     # For inbound calls, ensure calls table has an entry with correct caller vs callee numbers
     if is_inbound:

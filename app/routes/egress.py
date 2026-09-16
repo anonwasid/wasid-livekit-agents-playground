@@ -144,11 +144,7 @@ async def stream_recording(
         raise HTTPException(status_code=502, detail=f"Failed to stream recording: {e}")
 
 
-@router.get("/egress/{recording_id}/download", dependencies=[Depends(requires_admin)])
-async def download_recording(
-    recording_id: str,
-):
-    """Directly download recording file in standard MP3 format with pre-signed Cloudflare R2 URL."""
+async def _get_recording_download_url(recording_id: str) -> str:
     rec = await telephony_db.get_recording(recording_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Recording not found")
@@ -185,14 +181,35 @@ async def download_recording(
 
     url = storage_r2.generate_presigned_url(
         target_key,
-        expires_in=600,
+        expires_in=3600,
         download=True,
         filename=filename,
     )
     if not url:
         raise HTTPException(status_code=500, detail="Failed to generate secure download link")
 
+    return url
+
+
+@router.get("/egress/{recording_id}/download", dependencies=[Depends(requires_admin)])
+async def download_recording(recording_id: str):
+    """Directly download recording file in standard MP3 format with pre-signed Cloudflare R2 URL."""
+    url = await _get_recording_download_url(recording_id)
     return RedirectResponse(url=url, status_code=307)
+
+
+@router.get("/api/v1/egress/{recording_id}/download")
+async def api_download_recording(recording_id: str):
+    """API endpoint to directly download recording file in MP3 format with pre-signed R2 URL."""
+    url = await _get_recording_download_url(recording_id)
+    return RedirectResponse(url=url, status_code=307)
+
+
+@router.get("/api/v1/egress/{recording_id}/download-url")
+async def api_download_recording_url(recording_id: str):
+    """API endpoint to obtain pre-signed MP3 download URL for a recording."""
+    url = await _get_recording_download_url(recording_id)
+    return {"status": "success", "recording_id": recording_id, "download_url": url}
 
 
 @router.post("/egress/{recording_id}/delete", dependencies=[Depends(requires_admin)])
