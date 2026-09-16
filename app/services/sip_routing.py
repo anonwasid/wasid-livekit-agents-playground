@@ -526,6 +526,9 @@ class SipRoutingService:
         agent_name: str = CANONICAL_MASTER_AGENT,
         participant_identity: Optional[str] = None,
         tenant_id: str = DEFAULT_TENANT_ID,
+        caller_did: str = "+918065355408",
+        voice_mode: str = "realtime",
+        call_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Initiate an outbound SIP call enforcing ONE CALL = ONE UNIQUE ROOM and automatic agent dispatch."""
         if not lk.sip_enabled:
@@ -547,24 +550,31 @@ class SipRoutingService:
                 call_id=call_id,
                 room_name=room_name,
                 direction="outbound",
-                caller_did="Carrier Assigned",
+                caller_did=caller_did,
                 callee_did=sip_call_to,
                 agent_id=agent_name,
                 tenant_id=tenant_id,
-                metadata={"sip_trunk_id": sip_trunk_id, "room_name": room_name},
+                metadata={"sip_trunk_id": sip_trunk_id, "room_name": room_name, "voice_mode": voice_mode, **(call_context or {})},
             )
         except Exception as e:
             logger.warning("Failed to record outbound call start in PostgreSQL: %s", e)
 
-        # 3. Prepare metadata
-        call_meta = json.dumps({
+        # 3. Prepare metadata with full canonical context
+        meta_dict = {
             "call_id": call_id,
             "tenant_id": tenant_id,
             "agent_id": agent_name,
             "direction": "outbound",
+            "call_direction": "OUTBOUND",
             "call_to": sip_call_to,
+            "caller_did": caller_did,
+            "voice_mode": voice_mode,
+            "mode": voice_mode,
             "created_at": timestamp,
-        })
+        }
+        if call_context and isinstance(call_context, dict):
+            meta_dict.update(call_context)
+        call_meta = json.dumps(meta_dict)
 
         # 4. Dispatch canonical agent to the unique room
         try:

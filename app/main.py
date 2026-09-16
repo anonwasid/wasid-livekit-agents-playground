@@ -125,6 +125,7 @@ async def auth_guard_middleware(request: Request, call_next):
         or path.startswith("/static/")
         or path.startswith("/api/webhooks/")
         or path.startswith("/api/v1/transcriptions")
+        or path.startswith("/api/v1/sip/")
     ):
         return await call_next(request)
 

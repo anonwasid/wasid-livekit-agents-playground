@@ -3,10 +3,11 @@
 import json
 import logging
 import os
-from fastapi import APIRouter, Depends, Request, Form
+from fastapi import APIRouter, Depends, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from typing import Optional, Dict, Any
 from urllib.parse import quote
+from pydantic import BaseModel, Field
 
 from app.services.livekit import LiveKitClient, get_livekit_client
 from app.security.basic_auth import requires_admin, get_current_user
@@ -15,6 +16,54 @@ from app.security.csrf import get_csrf_token, verify_csrf_token
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class OutboundCallPayload(BaseModel):
+    sip_trunk_id: str = Field(default="ST_7DxmGrQdRtgT")
+    sip_call_to: str
+    caller_did: str = Field(default="+918065355408")
+    agent_name: str = Field(default="wasid-ai-automation-master")
+    tenant_id: str = Field(default="wasid-hq")
+    voice_mode: str = Field(default="realtime")
+    call_context: Optional[Dict[str, Any]] = None
+
+
+@router.post("/api/v1/sip/outbound-call")
+async def api_create_outbound_sip_call(
+    payload: OutboundCallPayload,
+    lk: LiveKitClient = Depends(get_livekit_client),
+):
+    """Programmatic API to dispatch outbound SIP call with structured context."""
+    if not lk.sip_enabled:
+        raise HTTPException(status_code=503, detail="LiveKit SIP service is not enabled")
+
+    try:
+        from app.services.sip_routing import sip_routing_service, CANONICAL_MASTER_AGENT
+        target_agent = payload.agent_name.strip() if payload.agent_name else CANONICAL_MASTER_AGENT
+
+        res = await sip_routing_service.initiate_outbound_call(
+            lk=lk,
+            sip_trunk_id=payload.sip_trunk_id.strip(),
+            sip_call_to=payload.sip_call_to.strip(),
+            agent_name=target_agent,
+            tenant_id=payload.tenant_id.strip() if payload.tenant_id else "wasid-hq",
+            caller_did=payload.caller_did.strip() if payload.caller_did else "+918065355408",
+            voice_mode=payload.voice_mode.strip().lower() if payload.voice_mode else "realtime",
+            call_context=payload.call_context,
+        )
+        return {
+            "success": True,
+            "call_id": res["call_id"],
+            "room_name": res["room_name"],
+            "caller_did": payload.caller_did,
+            "callee": payload.sip_call_to,
+            "agent_name": target_agent,
+            "voice_mode": payload.voice_mode,
+            "message": f"Outbound call placed to {payload.sip_call_to} in room '{res['room_name']}'."
+        }
+    except Exception as e:
+        logger.error("Failed to place outbound SIP call via API: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to place outbound call: {str(e)}")
 
 
 @router.get("/sip-outbound", response_class=HTMLResponse, dependencies=[Depends(requires_admin)])
