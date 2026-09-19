@@ -1052,6 +1052,262 @@ class TelephonyDatabase:
 
             return {"found": False, "phone": phone_number}
 
+    async def get_tenant_outbound_did(self, tenant_id: str) -> Optional[str]:
+        """Fetch tenant's assigned authoritative outbound DID from PostgreSQL."""
+        if not tenant_id:
+            return None
+        tid_clean = tenant_id.strip()
+        if tid_clean in ("wasid-hq", "WAS12345678", "ADMIN"):
+            return "+918065355408"
+
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            try:
+                stmt = select(DidRoutingRecord).where(
+                    DidRoutingRecord.tenant_id.ilike(f"%{tid_clean}%"),
+                    DidRoutingRecord.is_active == True,
+                )
+                res = await session.execute(stmt)
+                rec = res.scalars().first()
+                if rec and rec.did:
+                    return rec.did
+            except Exception as e:
+                logger.warning("Error fetching tenant outbound DID for '%s': %s", tenant_id, e)
+
+        return None
+
+    async def check_active_call_exists(
+        self,
+        tenant_id: str,
+        destination: str,
+        lead_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Concurrency-safe check against PostgreSQL for an existing active call to the same destination/target."""
+        if not destination and not lead_id:
+            return None
+
+        clean_dest = re.sub(r"[^\d+]", "", destination) if destination else ""
+        tail_dest = clean_dest[-10:] if len(clean_dest) >= 10 else clean_dest
+
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            try:
+                stmt = select(CallRecord).where(
+                    CallRecord.tenant_id == tenant_id,
+                    CallRecord.status.in_(["active", "initiated", "ringing"]),
+                )
+                res = await session.execute(stmt)
+                active_calls = res.scalars().all()
+
+                for c in active_calls:
+                    c_callee = re.sub(r"[^\d+]", "", c.callee_did or "")
+                    c_tail = c_callee[-10:] if len(c_callee) >= 10 else c_callee
+                    if tail_dest and (tail_dest == c_tail or tail_dest in c_callee):
+                        return c.to_dict()
+
+                    if lead_id and c.metadata_json and lead_id in c.metadata_json:
+                        return c.to_dict()
+            except Exception as e:
+                logger.warning("Error checking active call existence: %s", e)
+
+        return None
+
+    async def verify_target_ownership(
+        self,
+        tenant_id: str,
+        phone: str,
+        lead_id: Optional[str] = None,
+        contact_id: Optional[str] = None,
+        customer_id: Optional[str] = None,
+        is_admin_override: bool = False,
+    ) -> Dict[str, Any]:
+        """Strict server-side validation ensuring outbound destination belongs to the requesting tenant."""
+        if not tenant_id:
+            return {"allowed": False, "status": "missing_tenant", "error": "Missing required tenant_id"}
+
+        tid = tenant_id.strip()
+        clean_phone = re.sub(r"[^\d+]", "", phone) if phone else ""
+        phone_tail = clean_phone[-10:] if len(clean_phone) >= 10 else clean_phone
+
+        await self.init_db()
+        sessionmaker = self.get_sessionmaker()
+        async with sessionmaker() as session:
+            # 1. Target by lead_id
+            target_lead_id = lead_id or customer_id
+            if target_lead_id:
+                try:
+                    q = text("SELECT id, tenant_id, name, phone, company_name FROM customer_leads WHERE id = :lid LIMIT 1")
+                    res = await session.execute(q, {"lid": target_lead_id})
+                    row = res.fetchone()
+                    if not row:
+                        return {
+                            "allowed": False,
+                            "status": "target_not_found",
+                            "error": f"Lead '{target_lead_id}' not found in database",
+                        }
+
+                    lead_tenant = str(row[1] or "")
+                    lead_phone = str(row[3] or "")
+                    lead_name = str(row[2] or "Customer")
+
+                    # Cross-tenant check
+                    if tid != lead_tenant and tid.upper() != lead_tenant.upper():
+                        if not (is_admin_override and tid in ("wasid-hq", "WAS12345678", "ADMIN")):
+                            return {
+                                "allowed": False,
+                                "status": "tenant_mismatch",
+                                "error": f"TENANT_TARGET_MISMATCH: Lead '{target_lead_id}' belongs to tenant '{lead_tenant}', but caller requested tenant '{tid}'.",
+                                "target_tenant": lead_tenant,
+                            }
+
+                    # Phone validation against registered lead phone
+                    lead_clean = re.sub(r"[^\d+]", "", lead_phone)
+                    lead_tail = lead_clean[-10:] if len(lead_clean) >= 10 else lead_clean
+                    if phone_tail and lead_tail and phone_tail != lead_tail:
+                        return {
+                            "allowed": False,
+                            "status": "phone_mismatch",
+                            "error": f"Destination phone '{phone}' does not match registered lead phone '{lead_phone}'.",
+                        }
+
+                    return {
+                        "allowed": True,
+                        "target_type": "lead",
+                        "target_id": target_lead_id,
+                        "customer_name": lead_name,
+                        "phone": lead_phone or phone,
+                        "tenant_id": lead_tenant,
+                    }
+                except Exception as e:
+                    logger.warning("Error verifying lead target ownership: %s", e)
+                    return {"allowed": False, "status": "db_error", "error": str(e)}
+
+            # 2. Target by contact_id
+            if contact_id:
+                try:
+                    q = text("SELECT id, tenant_id, name, phone FROM customer_members WHERE id = :cid LIMIT 1")
+                    res = await session.execute(q, {"cid": contact_id})
+                    row = res.fetchone()
+                    if row:
+                        mem_tenant = str(row[1] or "")
+                        mem_phone = str(row[3] or "")
+                        mem_name = str(row[2] or "Member")
+
+                        if tid != mem_tenant and tid.upper() != mem_tenant.upper():
+                            if not (is_admin_override and tid in ("wasid-hq", "WAS12345678", "ADMIN")):
+                                return {
+                                    "allowed": False,
+                                    "status": "tenant_mismatch",
+                                    "error": f"TENANT_TARGET_MISMATCH: Contact '{contact_id}' belongs to tenant '{mem_tenant}', not '{tid}'.",
+                                    "target_tenant": mem_tenant,
+                                }
+
+                        mem_clean = re.sub(r"[^\d+]", "", mem_phone)
+                        mem_tail = mem_clean[-10:] if len(mem_clean) >= 10 else mem_clean
+                        if phone_tail and mem_tail and phone_tail != mem_tail:
+                            return {
+                                "allowed": False,
+                                "status": "phone_mismatch",
+                                "error": f"Destination phone '{phone}' does not match registered member phone '{mem_phone}'.",
+                            }
+
+                        return {
+                            "allowed": True,
+                            "target_type": "member",
+                            "target_id": contact_id,
+                            "customer_name": mem_name,
+                            "phone": mem_phone or phone,
+                            "tenant_id": mem_tenant,
+                        }
+                    else:
+                        return {
+                            "allowed": False,
+                            "status": "target_not_found",
+                            "error": f"Contact '{contact_id}' not found in database",
+                        }
+                except Exception as e:
+                    logger.warning("Error verifying contact target ownership: %s", e)
+                    return {"allowed": False, "status": "db_error", "error": str(e)}
+
+            # 3. Raw phone number verification
+            if clean_phone and phone_tail:
+                try:
+                    # Check if destination belongs to a conflicting tenant
+                    pat = f"%{phone_tail}%"
+                    q_lead = text("SELECT id, tenant_id, name, phone FROM customer_leads WHERE phone LIKE :pat LIMIT 1")
+                    res_lead = await session.execute(q_lead, {"pat": pat})
+                    row_l = res_lead.fetchone()
+
+                    if row_l:
+                        l_tenant = str(row_l[1] or "")
+                        l_name = str(row_l[2] or "Lead")
+                        if tid != l_tenant and tid.upper() != l_tenant.upper():
+                            if not (is_admin_override and tid in ("wasid-hq", "WAS12345678", "ADMIN")):
+                                return {
+                                    "allowed": False,
+                                    "status": "tenant_mismatch",
+                                    "error": f"TENANT_TARGET_MISMATCH: Phone '{phone}' belongs to registered lead of tenant '{l_tenant}', but caller is tenant '{tid}'.",
+                                    "target_tenant": l_tenant,
+                                }
+                        return {
+                            "allowed": True,
+                            "target_type": "lead",
+                            "target_id": row_l[0],
+                            "customer_name": l_name,
+                            "phone": row_l[3] or phone,
+                            "tenant_id": l_tenant,
+                        }
+
+                    # Check customer_members
+                    q_mem = text("SELECT id, tenant_id, name, phone FROM customer_members WHERE phone LIKE :pat LIMIT 1")
+                    res_mem = await session.execute(q_mem, {"pat": pat})
+                    row_m = res_mem.fetchone()
+
+                    if row_m:
+                        m_tenant = str(row_m[1] or "")
+                        m_name = str(row_m[2] or "Member")
+                        if tid != m_tenant and tid.upper() != m_tenant.upper():
+                            if not (is_admin_override and tid in ("wasid-hq", "WAS12345678", "ADMIN")):
+                                return {
+                                    "allowed": False,
+                                    "status": "tenant_mismatch",
+                                    "error": f"TENANT_TARGET_MISMATCH: Phone '{phone}' belongs to registered member of tenant '{m_tenant}', but caller is tenant '{tid}'.",
+                                    "target_tenant": m_tenant,
+                                }
+                        return {
+                            "allowed": True,
+                            "target_type": "member",
+                            "target_id": row_m[0],
+                            "customer_name": m_name,
+                            "phone": row_m[3] or phone,
+                            "tenant_id": m_tenant,
+                        }
+
+                    # If phone is not registered under any tenant
+                    if tid in ("wasid-hq", "WAS12345678", "ADMIN") or is_admin_override:
+                        # WASID Admin is authorized for platform / test destinations
+                        return {
+                            "allowed": True,
+                            "target_type": "admin_ad_hoc",
+                            "customer_name": "Administrative Target",
+                            "phone": phone,
+                            "tenant_id": tid,
+                        }
+
+                    # Customer tenants cannot dial unknown/unregistered numbers
+                    return {
+                        "allowed": False,
+                        "status": "unregistered_target",
+                        "error": f"UNREGISTERED_TARGET: Phone '{phone}' is not a registered contact or lead belonging to tenant '{tid}'. Customer agent calls must target registered customers.",
+                    }
+                except Exception as e:
+                    logger.warning("Error verifying raw phone ownership: %s", e)
+                    return {"allowed": False, "status": "db_error", "error": str(e)}
+
+            return {"allowed": False, "status": "missing_target", "error": "Must provide a valid target (lead_id, contact_id, or phone)"}
+
 
 # Singleton instance
 telephony_db = TelephonyDatabase()

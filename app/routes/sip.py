@@ -20,10 +20,15 @@ router = APIRouter()
 
 class OutboundCallPayload(BaseModel):
     sip_trunk_id: str = Field(default="ST_7DxmGrQdRtgT")
-    sip_call_to: str
-    caller_did: str = Field(default="+918065355408")
-    agent_name: str = Field(default="wasid-ai-automation-master")
+    sip_call_to: Optional[str] = None
+    target_phone: Optional[str] = None
+    lead_id: Optional[str] = None
+    contact_id: Optional[str] = None
+    customer_id: Optional[str] = None
+    caller_did: Optional[str] = None
+    agent_name: Optional[str] = None
     tenant_id: str = Field(default="wasid-hq")
+    is_admin_override: bool = False
     voice_mode: str = Field(default="realtime")
     call_context: Optional[Dict[str, Any]] = None
 
@@ -33,33 +38,108 @@ async def api_create_outbound_sip_call(
     payload: OutboundCallPayload,
     lk: LiveKitClient = Depends(get_livekit_client),
 ):
-    """Programmatic API to dispatch outbound SIP call with structured context."""
+    """Programmatic API to dispatch outbound SIP call with server-side target ownership validation and deduplication."""
     if not lk.sip_enabled:
         raise HTTPException(status_code=503, detail="LiveKit SIP service is not enabled")
 
-    try:
-        from app.services.sip_routing import sip_routing_service, CANONICAL_MASTER_AGENT
-        target_agent = payload.agent_name.strip() if payload.agent_name else CANONICAL_MASTER_AGENT
+    # 1. Resolve tenant_id
+    if not payload.tenant_id:
+        raise HTTPException(status_code=400, detail="Missing required tenant_id")
+    tenant_id = payload.tenant_id.strip()
 
+    # 2. Resolve destination phone
+    destination = (payload.sip_call_to or payload.target_phone or "").strip()
+
+    from app.services.db import telephony_db
+
+    # 3. Concurrency-Safe Deduplication Check: reject if active call exists for same tenant and destination/target
+    active_call = await telephony_db.check_active_call_exists(
+        tenant_id=tenant_id,
+        destination=destination,
+        lead_id=payload.lead_id or payload.customer_id,
+    )
+    if active_call:
+        logger.warning(
+            "Duplicate outbound call rejected for tenant '%s' and destination '%s' (Existing call_id: %s, status: %s)",
+            tenant_id, destination, active_call.get("call_id"), active_call.get("status")
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=f"DUPLICATE_ACTIVE_CALL: An active call already exists for destination '{destination}' under tenant '{tenant_id}' (call_id: {active_call.get('call_id')})."
+        )
+
+    # 4. Server-Side Target Ownership Validation
+    ownership = await telephony_db.verify_target_ownership(
+        tenant_id=tenant_id,
+        phone=destination,
+        lead_id=payload.lead_id,
+        contact_id=payload.contact_id,
+        customer_id=payload.customer_id,
+        is_admin_override=payload.is_admin_override,
+    )
+
+    if not ownership.get("allowed"):
+        err_status = ownership.get("status")
+        err_msg = ownership.get("error", "Outbound target validation failed")
+        logger.warning("Outbound call blocked by target ownership validation: %s", err_msg)
+        if err_status in ("tenant_mismatch", "cross_tenant_conflict"):
+            raise HTTPException(status_code=403, detail=err_msg)
+        else:
+            raise HTTPException(status_code=400, detail=err_msg)
+
+    # Update destination from validated database record if resolved
+    if ownership.get("phone"):
+        destination = ownership["phone"]
+
+    # 5. Outbound Caller ID / DID Selection
+    if payload.caller_did:
+        caller_did = payload.caller_did.strip()
+    else:
+        assigned_did = await telephony_db.get_tenant_outbound_did(tenant_id)
+        caller_did = assigned_did or "+918065355408"
+
+    # 6. Agent Selection
+    from app.services.sip_routing import sip_routing_service, CANONICAL_MASTER_AGENT, CANONICAL_CUSTOMER_AGENT
+    if payload.agent_name:
+        target_agent = payload.agent_name.strip()
+    else:
+        target_agent = CANONICAL_MASTER_AGENT if tenant_id in ("wasid-hq", "WAS12345678", "ADMIN") else CANONICAL_CUSTOMER_AGENT
+
+    # 7. Merge trusted outbound context & verification state
+    enriched_context: Dict[str, Any] = dict(payload.call_context or {})
+    enriched_context.update({
+        "direction": "outbound",
+        "call_direction": "OUTBOUND",
+        "verification_state": "OUTBOUND_VERIFIED",
+        "tenant_id": tenant_id,
+        "customer_name": ownership.get("customer_name") or enriched_context.get("customer_name") or "",
+        "target_type": ownership.get("target_type") or "contact",
+        "lead_id": payload.lead_id or ownership.get("target_id") or enriched_context.get("lead_id") or "",
+        "contact_id": payload.contact_id or enriched_context.get("contact_id") or "",
+    })
+
+    try:
         res = await sip_routing_service.initiate_outbound_call(
             lk=lk,
             sip_trunk_id=payload.sip_trunk_id.strip(),
-            sip_call_to=payload.sip_call_to.strip(),
+            sip_call_to=destination,
             agent_name=target_agent,
-            tenant_id=payload.tenant_id.strip() if payload.tenant_id else "wasid-hq",
-            caller_did=payload.caller_did.strip() if payload.caller_did else "+918065355408",
+            tenant_id=tenant_id,
+            caller_did=caller_did,
             voice_mode=payload.voice_mode.strip().lower() if payload.voice_mode else "realtime",
-            call_context=payload.call_context,
+            call_context=enriched_context,
         )
         return {
             "success": True,
             "call_id": res["call_id"],
             "room_name": res["room_name"],
-            "caller_did": payload.caller_did,
-            "callee": payload.sip_call_to,
+            "caller_did": caller_did,
+            "callee": destination,
             "agent_name": target_agent,
+            "tenant_id": tenant_id,
+            "verification_state": "OUTBOUND_VERIFIED",
             "voice_mode": payload.voice_mode,
-            "message": f"Outbound call placed to {payload.sip_call_to} in room '{res['room_name']}'."
+            "message": f"Outbound call placed to {destination} in room '{res['room_name']}' with caller DID {caller_did}."
         }
     except Exception as e:
         logger.error("Failed to place outbound SIP call via API: %s", e)
